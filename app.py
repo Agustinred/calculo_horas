@@ -73,7 +73,7 @@ if uploaded_file_permisos:
     try:
         df_p = pd.read_excel(uploaded_file_permisos)
         
-        # Sanitizar columnas de nombres separados de la captura real
+        # Sanitizar columnas de nombres separados
         df_p['Nombres'] = df_p['Nombres'].fillna('').astype(str).str.strip()
         df_p['ApellidoPaterno'] = df_p['ApellidoPaterno'].fillna('').astype(str).str.strip()
         df_p['ApellidoMaterno'] = df_p['ApellidoMaterno'].fillna('').astype(str).str.strip()
@@ -85,12 +85,16 @@ if uploaded_file_permisos:
             df_p['ApellidoMaterno']
         ).str.replace(r'\s+', ' ', regex=True).str.strip()
         
-        # Normalizar string para coincidencia exacta con Hoja1
+        # Normalizar string para coincidencia exacta
         df_p['Nombre_Normalizado'] = df_p['Nombre_Completo_Raw'].apply(normalizar_texto_local)
         
-        # Forzar la lectura estricta de la columna O ('FechaInicio')
+        # Forzar la lectura estricta y remover zonas horarias para evitar desfases de días
         if 'FechaInicio' in df_p.columns:
-            df_p['Fecha_Str'] = pd.to_datetime(df_p['FechaInicio'], errors='coerce').dt.strftime('%Y-%m-%d')
+            fechas_transformadas = pd.to_datetime(df_p['FechaInicio'], errors='coerce')
+            # Si tiene zona horaria, quitarla para evitar que mueva el día
+            if fechas_transformadas.dt.tz is not None:
+                fechas_transformadas = fechas_transformadas.dt.tz_convert(None)
+            df_p['Fecha_Str'] = fechas_transformadas.dt.strftime('%Y-%m-%d')
         else:
             st.sidebar.error("⚠️ No se encontró la columna 'FechaInicio' en el archivo de permisos.")
             df_p['Fecha_Str'] = None
@@ -366,7 +370,7 @@ if len(funcionarios_filtrados) > 0:
                     idx = columnas.index('Observación')
                     df_detalle.insert(idx, 'Permiso Externo (Horas)', horas_permiso_lista)
                 else:
-                    df_detalle['Permiso Externo (Horas)'] = horas_permiso_lista
+                    df_detalle['Permiso Externo (Horas)', horas_permiso_lista]
                 
                 st.dataframe(df_detalle, use_container_width=True, hide_index=True)
                 st.markdown("---")
