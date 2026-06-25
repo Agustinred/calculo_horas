@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 import io
+import re
+import unicodedata
 from modules.data_loader import DataLoader
 from modules.calculator import HorasCalculator
 from modules.formatter import Formatter
@@ -12,13 +14,23 @@ st.set_page_config(
     layout="wide"
 )
 
-# Función interna de normalización para asegurar consistencia en el cruce
+# 🔄 FUNCIÓN DE NORMALIZACIÓN ULTRA ESTRICTA (Nombres, Mayúsculas, Tildes, Espacios, Puntos)
 def normalizar_texto_local(texto):
     if not texto or pd.isna(texto):
         return ""
-    import unicodedata
-    texto = str(texto).strip().upper()
+    
+    # 1. Convertir a string y pasar a mayúsculas
+    texto = str(texto).upper()
+    
+    # 2. Remover tildes, diéresis y acentos complejos
     texto = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
+    
+    # 3. Remover puntos, comas, guiones y cualquier carácter que no sea letra o espacio
+    texto = re.sub(r'[^A-Z\s]', ' ', texto)
+    
+    # 4. Colapsar múltiples espacios o espacios dobles en uno solo y limpiar extremos
+    texto = re.sub(r'\s+', ' ', texto).strip()
+    
     return texto
 
 st.markdown("""
@@ -49,7 +61,7 @@ archivos_subidos = st.sidebar.file_uploader(
     key="uploader_asistencia"
 )
 
-# Nuevo Cargador Opcional para la Base de Permisos (Desagregada)
+# Nuevo Cargador Opcional para la Base de Permisos
 uploaded_file_permisos = st.sidebar.file_uploader(
     "Selecciona archivo de Permisos (Opcional)",
     type=['xlsx', 'xls'],
@@ -66,27 +78,27 @@ if not archivos_subidos:
     """)
     st.stop()
 
-# Procesamiento de la Base de Permisos Externa con Columna O ('FechaInicio')
+# Procesamiento de la Base de Permisos Externa con Orden Solicitado
 df_permisos_dict = {}
-debug_df_permisos = pd.DataFrame()  # Para diagnóstico
+debug_df_permisos = pd.DataFrame()
 
 if uploaded_file_permisos:
     try:
         df_p = pd.read_excel(uploaded_file_permisos)
         
-        # Sanitizar columnas de nombres separados
+        # Sanitizar columnas de nombres separados eliminando espacios extras
         df_p['Nombres'] = df_p['Nombres'].fillna('').astype(str).str.strip()
         df_p['ApellidoPaterno'] = df_p['ApellidoPaterno'].fillna('').astype(str).str.strip()
         df_p['ApellidoMaterno'] = df_p['ApellidoMaterno'].fillna('').astype(str).str.strip()
         
-        # Concatenar Nombre Completo (Nombres + Apellidos)
+        # 🧩 CONCATENACIÓN SOLICITADA: Nombres + ApellidoPaterno + ApellidoMaterno
         df_p['Nombre_Completo_Raw'] = (
             df_p['Nombres'] + " " + 
             df_p['ApellidoPaterno'] + " " + 
             df_p['ApellidoMaterno']
-        ).str.replace(r'\s+', ' ', regex=True).str.strip()
+        )
         
-        # Normalizar string para coincidencia exacta
+        # Aplicar la nueva normalización estricta sobre el nombre armado
         df_p['Nombre_Normalizado'] = df_p['Nombre_Completo_Raw'].apply(normalizar_texto_local)
         
         # Forzar la lectura estricta y remover zonas horarias para evitar desfases de días
@@ -96,7 +108,7 @@ if uploaded_file_permisos:
                 fechas_transformadas = fechas_transformadas.dt.tz_convert(None)
             df_p['Fecha_Str'] = fechas_transformadas.dt.strftime('%Y-%m-%d')
         else:
-            st.sidebar.error("⚠️ No se encontró la columna 'FechaInicio' en el archivo de permisos.")
+            st.sidebar.error("⚠️ No se encontró la columna 'FechaInicio' in el archivo de permisos.")
             df_p['Fecha_Str'] = None
         
         # Guardar copia para la tabla de diagnóstico inferior
@@ -157,14 +169,16 @@ with st.spinner("Procesando archivo..."):
     if 'Observacion' in df_h1.columns:
         df_h1['Observacion'] = df_h1['Observacion'].fillna('').astype(str).str.strip()
         
-    # Garantizar columnas de normalización en el DataFrame principal
-    if 'Nombre_Normalizado' not in df_h1.columns:
+    # Buscar dinámicamente la columna Nombre en la asistencia
+    col_nombre_asist = [c for c in df_h1.columns if 'nombre' in str(c).lower()]
+    if col_nombre_asist:
+        df_h1['Nombre_Normalizado'] = df_h1[col_nombre_asist[0]].apply(normalizar_texto_local)
+    else:
         df_h1['Nombre_Normalizado'] = df_h1['Nombre'].apply(normalizar_texto_local)
         
-    if 'Nombre_Normalizado' not in df_h2.columns:
-        col_cat_nombre = 'NOMBRE' if 'NOMBRE' in df_h2.columns else 'Nombre'
-        if col_cat_nombre in df_h2.columns:
-            df_h2['Nombre_Normalizado'] = df_h2[col_cat_nombre].apply(normalizar_texto_local)
+    col_cat_nombre = 'NOMBRE' if 'NOMBRE' in df_h2.columns else 'Nombre'
+    if col_cat_nombre in df_h2.columns:
+        df_h2['Nombre_Normalizado'] = df_h2[col_cat_nombre].apply(normalizar_texto_local)
 
     # 🔄 CONTROL DE EXCEPCIONES Y LLAMADA COMPATIBLE CON LA CALCULADORA 🔄
     try:
@@ -282,6 +296,7 @@ if len(funcionarios_filtrados) > 0:
                 break
         
         if resultado_funcionario:
+            # Re-normalizar el nombre seleccionado usando el nuevo estándar estricto
             nombre_norm_func = normalizar_texto_local(resultado_funcionario['nombre'])
             
             col1, col2, col3 = st.columns(3)
@@ -348,26 +363,23 @@ if len(funcionarios_filtrados) > 0:
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # Obtener la tabla base detallada de la semana
                 df_detalle = Formatter.crear_df_detalle_semana(semana_info['días'])
                 
-                # 🔄 CALCULAR E INYECTAR LA COLUMNA DE PERMISOS EXTERNOS EN TIEMPO REAL 🔄
+                # 🔄 INYECCIÓN DE PERMISOS EXTERNOS CON LA NUEVA LLAVE NORMALIZADA
                 horas_permiso_lista = []
                 for _, row_dia in df_detalle.iterrows():
                     try:
-                        # Extraer el número de día limpiando el string (ej: "VIERNES 9" -> "09")
                         dia_str = str(row_dia['Día']).split()[-1].zfill(2)
                         fecha_busqueda = f"{fecha_mes.strftime('%Y-%m')}-{dia_str}"
                     except Exception:
                         fecha_busqueda = ""
                         
                     minutos_p = df_permisos_dict.get((nombre_norm_func, fecha_busqueda), 0)
-                    if minutos_p > 0:
+                    if minutes_p > 0:
                         horas_permiso_lista.append(f"⏱️ {minutos_p // 60:02d}:{minutos_p % 60:02d}")
                     else:
                         horas_permiso_lista.append("00:00")
                 
-                # Ubicar la columna estéticamente justo antes de 'Observación'
                 columnas = list(df_detalle.columns)
                 if 'Observación' in columnas:
                     idx = columnas.index('Observación')
@@ -414,37 +426,40 @@ with col3:
     )
 
 # =====================================================================
-# 🛠️ SECCIÓN DE DIAGNÓSTICO DE ERRORES (TEMPORAL) 🛠️
+# 🛠️ PANEL DE DIAGNÓSTICO ULTRA DETALLADO (BÚSQUEDA GENERAL POR APELLIDO) 🛠️
 # =====================================================================
 st.markdown("---")
 st.subheader("🛠️ Panel de Diagnóstico e Inspección de Datos")
 with st.expander("🔎 Haz clic aquí para ver por qué no se cruzan los datos de Claudia Abarca"):
     
-    st.write("### 1. Datos cargados en el Archivo de Asistencia (Hoja 1):")
+    st.write("### 1. Inspección de Columnas y Datos en Asistencia (Hoja 1):")
     if 'df_h1' in locals():
-        # Filtrar registros que contengan CLAUDIA ABARCA en la asistencia
-        df_asist_claudia = df_h1[df_h1['Nombre_Normalizado'].str.contains('CLAUDIA', na=False)]
-        if not df_asist_claudia.empty:
-            st.write("**Nombre Normalizado detectado en Asistencia:**", df_asist_claudia['Nombre_Normalizado'].iloc[0])
-            st.write("**Muestra de filas encontradas en Asistencia:**")
-            st.dataframe(df_asist_claudia[['Nombre', 'Nombre_Normalizado', 'Fecha', 'DiaSemana']].head(5))
-        else:
-            st.error("❌ No se encontró a nadie con el nombre 'CLAUDIA' en el Archivo de Asistencia (Hoja 1). Verifica que esté escrito igual.")
+        st.write("**Columnas detectadas en Hoja 1:**", list(df_h1.columns))
+        
+        col_nombre_real = [c for c in df_h1.columns if 'nombre' in str(c).lower()]
+        if col_nombre_real:
+            col_a_usar = col_nombre_real[0]
+            df_asist_claudia = df_h1[df_h1['Nombre_Normalizado'].str.contains('ABARCA', na=False)]
             
-    st.write("### 2. Datos cargados en el Archivo de Permisos (Opcional):")
+            if not df_asist_claudia.empty:
+                st.success(f"🔍 ¡Encontrada en Asistencia!")
+                st.write(f"**Nombre Crudo original en Asistencia:** `{df_asist_claudia[col_a_usar].iloc[0]}`")
+                st.write(f"**Nombre Normalizado en Asistencia:** `{df_asist_claudia['Nombre_Normalizado'].iloc[0]}`")
+                st.dataframe(df_asist_claudia[[col_a_usar, 'Nombre_Normalizado', 'Fecha', 'DiaSemana']].head(3))
+            else:
+                st.error("❌ El texto 'ABARCA' no aparece indexado en la columna de asistencia.")
+                st.dataframe(df_h1.head(3))
+                
+    st.write("### 2. Inspección en Archivo de Permisos:")
     if not debug_df_permisos.empty:
-        # Filtrar registros que contengan CLAUDIA en los permisos
-        df_perm_claudia = debug_df_permisos[debug_df_permisos['Nombre_Normalizado'].str.contains('CLAUDIA', na=False)]
+        df_perm_claudia = debug_df_permisos[debug_df_permisos['Nombre_Normalizado'].str.contains('ABARCA', na=False)]
         if not df_perm_claudia.empty:
-            st.write("**Nombre Normalizado detectado en Permisos:**", df_perm_claudia['Nombre_Normalizado'].iloc[0])
-            st.write("**Datos crudos leídos del Excel de Permisos:**")
-            st.dataframe(df_perm_claudia[['Nombres', 'ApellidoPaterno', 'ApellidoMaterno', 'Nombre_Normalizado', 'FechaInicio', 'Fecha_Str', 'CantidadEnHora']])
-        else:
-            st.error("❌ No se encontró ningún registro para 'CLAUDIA' en el Archivo de Permisos.")
-    else:
-        st.warning("⚠️ No se ha cargado ningún archivo de permisos aún o está completamente vacío.")
+            st.success(f"🔍 ¡Encontrada en Permisos!")
+            st.write(f"**Combinación armada (Nombres + AP + AM):** `{df_perm_claudia['Nombre_Completo_Raw'].iloc[0]}`")
+            st.write(f"**Nombre Normalizado en Permisos:** `{df_perm_claudia['Nombre_Normalizado'].iloc[0]}`")
+            st.dataframe(df_perm_claudia[['Nombre_Completo_Raw', 'Nombre_Normalizado', 'Fecha_Str', 'CantidadEnHora']].head(3))
 
-    st.write("### 3. Inspección de Diccionario de Claves Generadas (Llaves del Mapa):")
+    st.write("### 3. Comparación de llaves generadas:")
     if df_permisos_dict:
-        st.write("Estas son las claves actuales guardadas en memoria para el cruce `(Funcionario, Fecha_Str)`. Compara si coinciden con los datos de arriba:")
-        st.write(list(df_permisos_dict.keys())[:15])
+        st.write("Muestra de claves guardadas en el diccionario para el cruce final:")
+        st.write(list(df_permisos_dict.keys())[:10])
