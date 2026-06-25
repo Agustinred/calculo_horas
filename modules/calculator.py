@@ -151,7 +151,7 @@ class HorasCalculator:
         Detecta si una semana es parcial (inicio o fin de mes)
         Retorna: (es_parcial, días_esperados, meta_horas_minutos)
         """
-        dias_en_semana = df_semana['DiaSemana'].str.lower().tolist()
+        dias_en_semana = df_semana['DiaPalabra'].astype(str).str.lower().tolist()
         
         # Obtener los números de días
         numeros_dias = sorted(df_semana['Número'].tolist())
