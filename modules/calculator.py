@@ -1,5 +1,5 @@
 """
-calculator.py - Lógica de cálculo de horas trabajadas (ACTUALIZADO CON CORRECCIÓN DE DÍAS NO HÁBILES)
+calculator.py - Lógica de cálculo de horas trabajadas (CORREGIDO - SEMANAS PARCIALES)
 """
 
 import pandas as pd
@@ -111,16 +111,14 @@ class HorasCalculator:
             salida_min = HorasCalculator._hora_a_minutos(hora_salida)
             
             if just_parcial == "mañana":
-                # Permiso mañana: Se cuenta solo la tarde (15:00 - HoraSalida)
                 if salida_min > 0:
-                    minutos_tarde = salida_min - (15 * 60)  # 15:00 = 900 min
+                    minutos_tarde = salida_min - (15 * 60)
                     return max(0, minutos_tarde), None
                 else:
                     alerta = f"{nombre} - Día {numero_dia} ({dia_semana}): Permiso mañana pero falta HoraSalida"
                     return 0, alerta
             
             elif just_parcial == "tarde":
-                # Permiso tarde: Se cuenta solo la mañana (HoraEntrada - 12:30)
                 if entrada_min > 0:
                     minutos_mañana = (12 * 60 + 30) - entrada_min
                     return max(0, minutos_mañana), None
@@ -140,11 +138,11 @@ class HorasCalculator:
             obs_lower = str(observacion).strip().lower()
             dia_lower = str(dia_semana).strip().lower()
             
-            # Si explícitamente es un día No Hábil o fin de semana, retorna neutral (0 minutos trabajados, sin alertas)
+            # Si es fin de semana o explícitamente dice No Hábil, retorna neutral
             if "no hábil" in obs_lower or "no habil" in obs_lower or "sabado" in dia_lower or "sábado" in dia_lower or "domingo" in dia_lower:
                 return 0, None
             
-            # Si es un día laboral normal sin marcas, genera alerta de ausencia
+            # Si es un día laboral de Lun a Vie sin marcas, genera la alerta
             if not hora_entrada or pd.isna(hora_entrada):
                 alerta = f"{nombre} - Día {numero_dia} ({dia_semana}): Falta HoraEntrada"
             else:
@@ -165,31 +163,24 @@ class HorasCalculator:
         if not numeros_dias:
             return False, 5, 44 * 60
         
-        # Detectar si es primera semana (no empieza en lunes)
+        # Detectar si es la primera semana del mes (no empieza en Lunes)
         es_primera_semana = 'lunes' not in dias_en_semana[0].lower() if dias_en_semana else False
         
-        # Detectar si es última semana (menos de 5 días en los registros generales)
-        es_ultima_semana = len(dias_en_semana) < 5
+        # Detectar si es la última semana del mes (menos de 5 días hábiles en los registros generales)
+        es_ultima_semana = len(df_semana[~df_semana['DiaPalabra'].astype(str).str.lower().str.contains('sabado|sábado|domingo')]) < 5
         
         if es_primera_semana or es_ultima_semana:
             meta_minutos = 0
             for _, row in df_semana.iterrows():
-                # Calcula la meta día por día usando la lógica corregida que omite fines de semana
                 meta_minutos += HorasCalculator._obtener_horas_esperadas(row['DiaSemana'])
             
-            return True, len(dias_en_semana), meta_minutos
+            return True, len(df_semana), meta_minutos
         
         return False, 5, 44 * 60
     
     @staticmethod
     def procesar_funcionario(df_empleado):
-        """
-        Procesa un empleado completo y calcula:
-        - Horas por semana (incluyendo semanas parciales)
-        - Diferencia semanal
-        - Total mensual (solo diferencias negativas)
-        - Alertas
-        """
+        """Procesa un empleado completo"""
         resultados = {
             'nombre': df_empleado['Nombre'].iloc[0] if len(df_empleado) > 0 else 'Desconocido',
             'semanas': {},
@@ -198,17 +189,19 @@ class HorasCalculator:
             'dias_por_semana': {}
         }
         
-        # Agrupar por semana
         for semana_num in sorted(df_empleado['Semana'].unique()):
             if pd.isna(semana_num):
                 continue
             
             df_semana = df_empleado[df_empleado['Semana'] == semana_num].sort_values('Número')
             
-            # Detectar si es semana parcial y obtener su meta ajustada
-            es_parcial, dias_esperados, meta_minutos = HorasCalculator._es_semana_parcial(
+            # Obtener el estado inicial de la semana
+            es_parcial, dias_esperados, meta_calculada = HorasCalculator._es_semana_parcial(
                 df_semana, semana_num, df_empleado
             )
+            
+            # Forzar la meta fija de 44 horas SOLAMENTE si no es una semana de borde de mes (parcial)
+            meta_semanal_final = meta_calculada if es_parcial else (44 * 60)
             
             minutos_semana = 0
             dias_info = []
@@ -228,20 +221,15 @@ class HorasCalculator:
                     'hora_entrada': row.get('HoraEntrada', ''),
                     'hora_salida': row.get('HoraSalida', ''),
                     'minutos': minutos_dia,
-                    'acumulado': acumulaged,
+                    'acumulado': acumulado,
                     'observacion': row.get('Observacion', '')
                 })
             
-            # Si no es semana parcial de borde de mes, se le asigna la meta estándar de 44 horas semanales
-            if not es_parcial:
-                meta_minutos = 44 * 60
-            
-            # Calcular diferencia semanal real
-            diferencia_minutos = minutos_semana - meta_minutos
+            diferencia_minutos = minutos_semana - meta_semanal_final
             
             resultados['semanas'][int(semana_num)] = {
                 'minutos_trabajados': minutos_semana,
-                'minutos_esperados': meta_minutos,
+                'minutos_esperados': meta_semanal_final,
                 'diferencia_minutos': diferencia_minutos,
                 'días': dias_info,
                 'es_parcial': es_parcial
@@ -249,7 +237,6 @@ class HorasCalculator:
             
             resultados['dias_por_semana'][int(semana_num)] = dias_info
             
-            # Sumar solo diferencias negativas al total mensual
             if diferencia_minutos < 0:
                 resultados['total_minutos_mes'] += diferencia_minutos
         
@@ -261,13 +248,11 @@ class HorasCalculator:
         resultados_todos = {}
         alertas_globales = []
         
-        # Agrupar por nombre normalizado
         for nombre_unico in df_hoja1['Nombre_Normalizado'].unique():
             df_empleado = df_hoja1[df_hoja1['Nombre_Normalizado'] == nombre_unico]
             
             resultado = HorasCalculator.procesar_funcionario(df_empleado)
             
-            # Obtener gerencia desde Hoja2
             gerencia_match = df_hoja2[df_hoja2['Nombre_Normalizado'] == nombre_unico]
             if len(gerencia_match) > 0:
                 resultado['gerencia'] = gerencia_match['GERENCIA'].iloc[0]
