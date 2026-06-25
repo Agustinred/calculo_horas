@@ -1,5 +1,5 @@
 """
-calculator.py - Lógica de cálculo de horas trabajadas (CORREGIDO - SEMANAS PARCIALES)
+calculator.py - Lógica de cálculo de horas con soporte de Permisos Administrativos (Mañana/Tarde) fijos
 """
 
 import pandas as pd
@@ -52,7 +52,7 @@ class HorasCalculator:
         """Retorna horas esperadas según día de la semana, excluyendo fines de semana"""
         dia_semana = str(dia_semana).strip().lower()
         if "sábado" in dia_semana or "sabado" in dia_semana or "domingo" in dia_semana:
-            return 0  # Fines de semana no exigen horas de forma predeterminada
+            return 0  
         elif "viernes" in dia_semana:
             return 8 * 60  # 8 horas en minutos
         else:
@@ -87,7 +87,7 @@ class HorasCalculator:
     @staticmethod
     def calcular_horas_dia(row):
         """
-        Calcula horas de un día específico
+        Calcula horas de un día específico incorporando las reglas de permisos administrativos fijos
         Retorna: (horas_minutos, alerta_ausencia)
         """
         alerta = None
@@ -104,27 +104,25 @@ class HorasCalculator:
             horas_esperadas = HorasCalculator._obtener_horas_esperadas(dia_semana)
             return horas_esperadas, None
         
-        # Caso 2: Justificación parcial
+        # Caso 2: Justificación parcial (Mañana o Tarde)
         just_parcial = HorasCalculator._obtener_justificacion_parcial(observacion)
-        if just_parcial:
+        if just_parcial in ["mañana", "tarde"]:
             entrada_min = HorasCalculator._hora_a_minutos(hora_entrada)
             salida_min = HorasCalculator._hora_a_minutos(hora_salida)
+            dia_lower = str(dia_semana).strip().lower()
             
-            if just_parcial == "mañana":
-                if salida_min > 0:
-                    minutos_tarde = salida_min - (15 * 60)
-                    return max(0, minutos_tarde), None
-                else:
-                    alerta = f"{nombre} - Día {numero_dia} ({dia_semana}): Permiso mañana pero falta HoraSalida"
-                    return 0, alerta
+            # Asignar base fija por la media jornada según el día
+            if "viernes" in dia_lower:
+                minutos_bonificados = 4 * 60       # 04:00 horas
+            else:
+                minutos_bonificados = (4 * 60) + 30  # 04:30 horas (Lun-Jue)
             
-            elif just_parcial == "tarde":
-                if entrada_min > 0:
-                    minutos_mañana = (12 * 60 + 30) - entrada_min
-                    return max(0, minutos_mañana), None
-                else:
-                    alerta = f"{nombre} - Día {numero_dia} ({dia_semana}): Permiso tarde pero falta HoraEntrada"
-                    return 0, alerta
+            # Sumar lo efectivamente trabajado en la otra media jornada si existen marcas validas
+            minutos_complementarios = 0
+            if entrada_min > 0 and salida_min > 0:
+                minutos_complementarios = max(0, salida_min - entrada_min)
+            
+            return (minutos_bonificados + minutos_complementarios), None
         
         # Caso 3: Entrada y salida normal
         if pd.notna(hora_entrada) and pd.notna(hora_salida) and str(hora_entrada).strip() != "" and str(hora_salida).strip() != "":
@@ -138,11 +136,9 @@ class HorasCalculator:
             obs_lower = str(observacion).strip().lower()
             dia_lower = str(dia_semana).strip().lower()
             
-            # Si es fin de semana o explícitamente dice No Hábil, retorna neutral
             if "no hábil" in obs_lower or "no habil" in obs_lower or "sabado" in dia_lower or "sábado" in dia_lower or "domingo" in dia_lower:
                 return 0, None
             
-            # Si es un día laboral de Lun a Vie sin marcas, genera la alerta
             if not hora_entrada or pd.isna(hora_entrada):
                 alerta = f"{nombre} - Día {numero_dia} ({dia_semana}): Falta HoraEntrada"
             else:
@@ -163,17 +159,13 @@ class HorasCalculator:
         if not numeros_dias:
             return False, 5, 44 * 60
         
-        # Detectar si es la primera semana del mes (no empieza en Lunes)
         es_primera_semana = 'lunes' not in dias_en_semana[0].lower() if dias_en_semana else False
-        
-        # Detectar si es la última semana del mes (menos de 5 días hábiles en los registros generales)
         es_ultima_semana = len(df_semana[~df_semana['DiaPalabra'].astype(str).str.lower().str.contains('sabado|sábado|domingo')]) < 5
         
         if es_primera_semana or es_ultima_semana:
             meta_minutos = 0
             for _, row in df_semana.iterrows():
                 meta_minutos += HorasCalculator._obtener_horas_esperadas(row['DiaSemana'])
-            
             return True, len(df_semana), meta_minutos
         
         return False, 5, 44 * 60
@@ -195,12 +187,10 @@ class HorasCalculator:
             
             df_semana = df_empleado[df_empleado['Semana'] == semana_num].sort_values('Número')
             
-            # Obtener el estado inicial de la semana
             es_parcial, dias_esperados, meta_calculada = HorasCalculator._es_semana_parcial(
                 df_semana, semana_num, df_empleado
             )
             
-            # Forzar la meta fija de 44 horas SOLAMENTE si no es una semana de borde de mes (parcial)
             meta_semanal_final = meta_calculada if es_parcial else (44 * 60)
             
             minutos_semana = 0
