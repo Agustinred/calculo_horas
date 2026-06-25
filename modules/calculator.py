@@ -1,5 +1,5 @@
 """
-calculator.py - Lógica de cálculo de horas con soporte de Permisos Administrativos (Mañana/Tarde) fijos
+calculator.py - Corrección de alertas falsas para días Justificados o Permisos Completos
 """
 
 import pandas as pd
@@ -17,7 +17,7 @@ class HorasCalculator:
         "per. compl. día", "permiso completo",
         "permiso matrimonio", "matrimonio",
         "vacaciones", "año nuevo", "viernes santo", "sabado santo",
-        "feriado", "día feriado"
+        "feriado", "día feriado", "justificado"
     ]
     
     # Observaciones que cuentan como media jornada
@@ -30,11 +30,15 @@ class HorasCalculator:
     
     @staticmethod
     def _hora_a_minutos(hora_str):
-        """Convierte HH:MM a minutos"""
+        """Convierte HH:MM a minutos de forma segura"""
         if not hora_str or pd.isna(hora_str):
             return 0
+        hora_str = str(hora_str).strip()
+        if not hora_str or hora_str.lower() in ['none', 'nan', 'nat']:
+            return 0
         try:
-            h, m = map(int, str(hora_str).split(':'))
+            partes = hora_str.split(':')
+            h, m = int(partes[0]), int(partes[1])
             return h * 60 + m
         except:
             return 0
@@ -54,9 +58,9 @@ class HorasCalculator:
         if "sábado" in dia_semana or "sabado" in dia_semana or "domingo" in dia_semana:
             return 0  
         elif "viernes" in dia_semana:
-            return 8 * 60  # 8 horas en minutos
+            return 8 * 60  
         else:
-            return 9 * 60  # 9 horas en minutos (Lun-Jue)
+            return 9 * 60  
     
     @staticmethod
     def _es_justificacion_completa(observacion):
@@ -87,19 +91,25 @@ class HorasCalculator:
     @staticmethod
     def calcular_horas_dia(row):
         """
-        Calcula horas de un día específico incorporando las reglas de permisos administrativos fijos
-        Retorna: (horas_minutos, alerta_ausencia)
+        Calcula horas de un día específico sanitizando marcas para evitar alertas falsas
         """
         alerta = None
         
-        hora_entrada = row.get('HoraEntrada')
-        hora_salida = row.get('HoraSalida')
+        hora_entrada_raw = row.get('HoraEntrada')
+        hora_salida_raw = row.get('HoraSalida')
+        
+        hora_entrada = str(hora_entrada_raw).strip() if pd.notna(hora_entrada_raw) else ""
+        hora_salida = str(hora_salida_raw).strip() if pd.notna(hora_salida_raw) else ""
+        
+        if hora_entrada.lower() in ['none', 'nan', 'nat', '']: hora_entrada = ""
+        if hora_salida.lower() in ['none', 'nan', 'nat', '']: hora_salida = ""
+        
         observacion = row.get('Observacion', '')
         dia_semana = row.get('DiaSemana', '')
         numero_dia = row.get('Número')
         nombre = row.get('Nombre', '')
         
-        # Caso 1: Justificación completa (vacaciones, licencia, etc)
+        # Caso 1: Justificación completa (vacaciones, licencia, PER. COMPL. DÍA, JUSTIFICADO)
         if HorasCalculator._es_justificacion_completa(observacion):
             horas_esperadas = HorasCalculator._obtener_horas_esperadas(dia_semana)
             return horas_esperadas, None
@@ -111,48 +121,58 @@ class HorasCalculator:
             salida_min = HorasCalculator._hora_a_minutos(hora_salida)
             dia_lower = str(dia_semana).strip().lower()
             
-            # Asignar base fija por la media jornada según el día
             if "viernes" in dia_lower:
-                minutos_bonificados = 4 * 60       # 04:00 horas
+                minutos_bonificados = 4 * 60       
             else:
-                minutos_bonificados = (4 * 60) + 30  # 04:30 horas (Lun-Jue)
+                minutos_bonificados = (4 * 60) + 30  
             
-            # Sumar lo efectivamente trabajado en la otra media jornada si existen marcas validas
             minutos_complementarios = 0
             if entrada_min > 0 and salida_min > 0:
                 minutos_complementarios = max(0, salida_min - entrada_min)
             
             return (minutos_bonificados + minutos_complementarios), None
         
-        # Caso 3: Entrada y salida normal
-        if pd.notna(hora_entrada) and pd.notna(hora_salida) and str(hora_entrada).strip() != "" and str(hora_salida).strip() != "":
+        # Caso 3: Entrada y salida normal con datos válidos
+        if hora_entrada != "" and hora_salida != "":
             entrada_min = HorasCalculator._hora_a_minutos(hora_entrada)
             salida_min = HorasCalculator._hora_a_minutos(hora_salida)
             minutos_trabajados = salida_min - entrada_min
             return max(0, minutos_trabajados), None
         
-        # Caso 4: Falta marcación o celdas vacías (Evaluando si es día libre/no hábil)
-        if not hora_entrada or not hora_salida or pd.isna(hora_entrada) or pd.isna(hora_salida):
+        # Caso 4: Falta marcación o celdas vacías
+        if hora_entrada == "" or hora_salida == "":
             obs_lower = str(observacion).strip().lower()
             dia_lower = str(dia_semana).strip().lower()
             
-            if "no hábil" in obs_lower or "no habil" in obs_lower or "sabado" in dia_lower or "sábado" in dia_lower or "domingo" in dia_lower:
+            # --- NUEVA EXCEPCIÓN AQUÍ ---
+            # Si el día está justificado, es permiso completo, fin de semana o no hábil, NO genera alerta
+            if (
+                "no hábil" in obs_lower or 
+                "no habil" in obs_lower or 
+                "justificado" in obs_lower or 
+                "per. compl. día" in obs_lower or 
+                "per. compl. dia" in obs_lower or
+                "sabado" in dia_lower or 
+                "sábado" in dia_lower or 
+                "domingo" in dia_lower
+            ):
                 return 0, None
             
-            if not hora_entrada or pd.isna(hora_entrada):
+            # Si es un día laboral normal y realmente falta la marca:
+            if hora_entrada == "" and hora_salida != "":
                 alerta = f"{nombre} - Día {numero_dia} ({dia_semana}): Falta HoraEntrada"
-            else:
+            elif hora_entrada != "" and hora_salida == "":
                 alerta = f"{nombre} - Día {numero_dia} ({dia_semana}): Falta HoraSalida"
+            elif hora_entrada == "" and hora_salida == "":
+                alerta = f"{nombre} - Día {numero_dia} ({dia_semana}): Falta Marcación Completa (Entrada y Salida)"
+                
             return 0, alerta
         
         return 0, None
     
     @staticmethod
     def _es_semana_parcial(df_semana, numero_semana, df_empleado_completo):
-        """
-        Detecta si una semana es parcial (inicio o fin de mes)
-        Retorna: (es_parcial, días_esperados, meta_horas_minutos)
-        """
+        """Detecta si una semana es parcial (inicio o fin de mes)"""
         dias_en_semana = df_semana['DiaPalabra'].astype(str).str.lower().tolist()
         numeros_dias = sorted(df_semana['Número'].tolist())
         
