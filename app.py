@@ -364,23 +364,34 @@ if len(funcionarios_filtrados) > 0:
                 
                 df_detalle = Formatter.crear_df_detalle_semana(semana_info['días'])
                 
-                # 🔄 INYECCIÓN MEJORADA Y EXTRA FLEXIBLE DE PERMISOS
+                # =====================================================================
+                # 🔄 INYECCIÓN MEJORADA, RESILIENTE Y EXTRA FLEXIBLE DE PERMISOS
+                # =====================================================================
                 horas_permiso_lista = []
                 for _, row_dia in df_detalle.iterrows():
                     minutos_p = 0
                     try:
-                        # Extraer el número del día de la celda (ej: "Viernes 09" -> "09")
+                        # 1. Extraer el número de día crudo (ej: "Viernes 09" -> "09")
                         dia_str = str(row_dia['Día']).split()[-1].zfill(2)
-                        
-                        # Generamos las dos opciones posibles de año según el contexto del archivo cargado
                         ano_actual = fecha_mes.year if fecha_mes else 2026
-                        fecha_busqueda_principal = f"{ano_actual}-{fecha_mes.strftime('%m')}-{dia_str}"
-                        fecha_busqueda_alternativa = f"2026-{fecha_mes.strftime('%m')}-{dia_str}"
                         
-                        # Buscar en el diccionario con ambas opciones
-                        minutos_p = df_permisos_dict.get((nombre_norm_func, fecha_busqueda_principal), 0)
-                        if minutos_p == 0:
-                            minutos_p = df_permisos_dict.get((nombre_norm_func, fecha_busqueda_alternativa), 0)
+                        # 2. Estrategia Iterativa: Probar todos los meses (01 al 12) para romper desfases de lectura
+                        encontrado = False
+                        for m in range(1, 13):
+                            mes_str = str(m).zfill(2)
+                            fecha_intento = f"{ano_actual}-{mes_str}-{dia_str}"
+                            
+                            if (nombre_norm_func, fecha_intento) in df_permisos_dict:
+                                minutos_p = df_permisos_dict[(nombre_norm_func, fecha_intento)]
+                                encontrado = True
+                                break
+                        
+                        # 3. Estrategia Fallback: Buscar cualquier llave que termine en el día exacto si falló la anterior
+                        if not encontrado:
+                            for key_dict in df_permisos_dict.keys():
+                                if key_dict[0] == nombre_norm_func and key_dict[1].endswith(f"-{dia_str}"):
+                                    minutos_p = df_permisos_dict[key_dict]
+                                    break
                     except Exception:
                         minutos_p = 0
                         
@@ -450,7 +461,6 @@ with st.expander("🔎 Haz clic aquí para inspeccionar las llaves de cruce exac
         col_nombre_real = [c for c in df_h1.columns if 'nombre' in str(c).lower()]
         if col_nombre_real:
             col_a_usar = col_nombre_real[0]
-            # 🎯 FILTRO EXACTO PARA EVITAR ENCONTRAR A PAMELA
             df_asist_filtrado = df_h1[df_h1['Nombre_Normalizado'] == nombre_a_diagnosticar]
             
             if not df_asist_filtrado.empty:
@@ -464,7 +474,6 @@ with st.expander("🔎 Haz clic aquí para inspeccionar las llaves de cruce exac
                 
     st.write("### 2. Inspección en Archivo de Permisos:")
     if not debug_df_permisos.empty:
-        # 🎯 FILTRO EXACTO TAMBIÉN EN PERMISOS
         df_perm_filtrado = debug_df_permisos[debug_df_permisos['Nombre_Normalizado'] == nombre_a_diagnosticar]
         if not df_perm_filtrado.empty:
             st.success(f"🔍 ¡Registros encontrados en Permisos!")
