@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import io
 from modules.data_loader import DataLoader
 from modules.calculator import HorasCalculator
 from modules.formatter import Formatter
@@ -65,7 +66,7 @@ if not archivos_subidos:
     """)
     st.stop()
 
-# Procesamiento de la Base de Permisos Externa (si fue cargada)
+# Procesamiento de la Base de Permisos Externa con Columna O ('FechaInicio')
 df_permisos_dict = {}
 
 if uploaded_file_permisos:
@@ -87,8 +88,12 @@ if uploaded_file_permisos:
         # Normalizar string para coincidencia exacta con Hoja1
         df_p['Nombre_Normalizado'] = df_p['Nombre_Completo_Raw'].apply(normalizar_texto_local)
         
-        # Formatear FechaInicio a string YYYY-MM-DD
-        df_p['Fecha_Str'] = pd.to_datetime(df_p['FechaInicio'], errors='coerce').dt.strftime('%Y-%m-%d')
+        # Forzar la lectura estricta de la columna O ('FechaInicio')
+        if 'FechaInicio' in df_p.columns:
+            df_p['Fecha_Str'] = pd.to_datetime(df_p['FechaInicio'], errors='coerce').dt.strftime('%Y-%m-%d')
+        else:
+            st.sidebar.error("⚠️ No se encontró la columna 'FechaInicio' en el archivo de permisos.")
+            df_p['Fecha_Str'] = None
         
         # Poblar diccionario optimizado de mapeo
         for _, row in df_p.iterrows():
@@ -119,7 +124,7 @@ if uploaded_file_permisos:
             else:
                 df_permisos_dict[key] = minutos
                 
-        st.sidebar.success(f"✅ Se cargaron {len(df_permisos_dict)} registros de permisos.")
+        st.sidebar.success(f"✅ Se cargaron {len(df_permisos_dict)} registros de permisos basados en 'FechaInicio'.")
     except Exception as e:
         st.sidebar.error(f"⚠️ Nota sobre permisos: No se pudo procesar el archivo opcional ({e})")
 
@@ -156,10 +161,8 @@ with st.spinner("Procesando archivo..."):
 
     # 🔄 CONTROL DE EXCEPCIONES Y LLAMADA COMPATIBLE CON LA CALCULADORA 🔄
     try:
-        # Intenta pasar el diccionario completo si la función ya fue actualizada en calculator.py
         resultados, alertas = HorasCalculator.procesar_todos(df_h1, df_h2, dict_permisos=df_permisos_dict)
     except TypeError:
-        # Si calculator.py no se ha actualizado todavía, procesa normalmente sin tumbar la app
         resultados, alertas = HorasCalculator.procesar_todos(df_h1, df_h2)
         if df_permisos_dict:
             st.warning("⚠️ El archivo de permisos se cargó, pero `modules/calculator.py` aún no está modificado para procesarlo.")
@@ -272,6 +275,8 @@ if len(funcionarios_filtrados) > 0:
                 break
         
         if resultado_funcionario:
+            nombre_norm_func = normalizar_texto_local(resultado_funcionario['nombre'])
+            
             col1, col2, col3 = st.columns(3)
             
             with col1:
@@ -336,7 +341,33 @@ if len(funcionarios_filtrados) > 0:
                 </div>
                 """, unsafe_allow_html=True)
                 
+                # Obtener la tabla base detallada de la semana
                 df_detalle = Formatter.crear_df_detalle_semana(semana_info['días'])
+                
+                # 🔄 CALCULAR E INYECTAR LA COLUMNA DE PERMISOS EXTERNOS EN TIEMPO REAL 🔄
+                horas_permiso_lista = []
+                for _, row_dia in df_detalle.iterrows():
+                    try:
+                        # Extraer el número de día limpiando el string (ej: "VIERNES 9" -> "09")
+                        dia_str = str(row_dia['Día']).split()[-1].zfill(2)
+                        fecha_busqueda = f"{fecha_mes.strftime('%Y-%m')}-{dia_str}"
+                    except Exception:
+                        fecha_busqueda = ""
+                        
+                    minutos_p = df_permisos_dict.get((nombre_norm_func, fecha_busqueda), 0)
+                    if minutos_p > 0:
+                        horas_permiso_lista.append(f"⏱️ {minutos_p // 60:02d}:{minutos_p % 60:02d}")
+                    else:
+                        horas_permiso_lista.append("00:00")
+                
+                # Ubicar la columna estéticamente justo antes de 'Observación'
+                columnas = list(df_detalle.columns)
+                if 'Observación' in columnas:
+                    idx = columnas.index('Observación')
+                    df_detalle.insert(idx, 'Permiso Externo (Horas)', horas_permiso_lista)
+                else:
+                    df_detalle['Permiso Externo (Horas)'] = horas_permiso_lista
+                
                 st.dataframe(df_detalle, use_container_width=True, hide_index=True)
                 st.markdown("---")
 
