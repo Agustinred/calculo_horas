@@ -1,5 +1,5 @@
 """
-formatter.py - Formatos, colores y presentación de datos
+formatter.py - Formatos, colores y presentación de datos (ACTUALIZADO)
 """
 
 import pandas as pd
@@ -89,7 +89,10 @@ class Formatter:
                 else:
                     estado_semana = "❌"
                 
-                fila[f'Sem {semana_num}'] = f"{estado_semana} {texto_semana}"
+                # Marcar si es semana parcial
+                es_parcial = " (P)" if semana_info.get('es_parcial') else ""
+                
+                fila[f'Sem {semana_num}'] = f"{estado_semana} {texto_semana}{es_parcial}"
             
             # Total mes
             total_minutos = resultado['total_minutos_mes']
@@ -109,6 +112,28 @@ class Formatter:
         return pd.DataFrame(datos)
     
     @staticmethod
+    def crear_df_detalle_semana(dias_info):
+        """
+        Crea DataFrame detallado de días en una semana
+        
+        Columns: Día, HoraEntrada, HoraSalida, HorasTrabajadas, Acumulado, Observación
+        """
+        datos = []
+        
+        for dia in dias_info:
+            fila = {
+                'Día': f"{dia['día']} {dia['número']}",
+                'Hora Entrada': dia.get('hora_entrada', '-'),
+                'Hora Salida': dia.get('hora_salida', '-'),
+                'Horas Trabajadas': Formatter._minutos_a_hora_texto(dia['minutos']),
+                'Acumulado Semana': Formatter._minutos_a_hora_texto(dia['acumulado']),
+                'Observación': dia.get('observacion', '')
+            }
+            datos.append(fila)
+        
+        return pd.DataFrame(datos)
+    
+    @staticmethod
     def aplicar_colores_semana(df, col_semana):
         """Retorna función para colorear celda de semana"""
         def colorear(val):
@@ -117,7 +142,9 @@ class Formatter:
             
             # Extraer minutos del texto "✅ -00:30"
             try:
-                parte_texto = str(val).split(' ')[-1]  # Obtiene "-00:30"
+                parte_texto = str(val).split(' ')[-1]  # Obtiene "-00:30(P)" o "-00:30"
+                parte_texto = parte_texto.replace('(P)', '')  # Remover marca de parcial
+                
                 horas, minutos = map(int, parte_texto.replace('-', '').split(':'))
                 diferencia = -(horas * 60 + minutos) if '-' in parte_texto else (horas * 60 + minutos)
                 
