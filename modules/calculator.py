@@ -1,5 +1,5 @@
 """
-calculator.py - Lógica de cálculo de horas trabajadas (ACTUALIZADO)
+calculator.py - Lógica de cálculo de horas trabajadas (ACTUALIZADO CON CORRECCIÓN DE DÍAS NO HÁBILES)
 """
 
 import pandas as pd
@@ -49,9 +49,11 @@ class HorasCalculator:
     
     @staticmethod
     def _obtener_horas_esperadas(dia_semana):
-        """Retorna horas esperadas según día de la semana"""
+        """Retorna horas esperadas según día de la semana, excluyendo fines de semana"""
         dia_semana = str(dia_semana).strip().lower()
-        if "viernes" in dia_semana:
+        if "sábado" in dia_semana or "sabado" in dia_semana or "domingo" in dia_semana:
+            return 0  # Fines de semana no exigen horas de forma predeterminada
+        elif "viernes" in dia_semana:
             return 8 * 60  # 8 horas en minutos
         else:
             return 9 * 60  # 9 horas en minutos (Lun-Jue)
@@ -109,35 +111,41 @@ class HorasCalculator:
             salida_min = HorasCalculator._hora_a_minutos(hora_salida)
             
             if just_parcial == "mañana":
-                # Permiso mañana: 7:30 a 15:00 = 7.5 horas (450 min)
-                # Se cuenta solo la tarde (15:00 - HoraSalida)
+                # Permiso mañana: Se cuenta solo la tarde (15:00 - HoraSalida)
                 if salida_min > 0:
                     minutos_tarde = salida_min - (15 * 60)  # 15:00 = 900 min
-                    return minutos_tarde, None
+                    return max(0, minutos_tarde), None
                 else:
                     alerta = f"{nombre} - Día {numero_dia} ({dia_semana}): Permiso mañana pero falta HoraSalida"
                     return 0, alerta
             
             elif just_parcial == "tarde":
-                # Permiso tarde: desde 12:30 = 750 min
-                # Se cuenta solo la mañana (HoraEntrada - 12:30)
+                # Permiso tarde: Se cuenta solo la mañana (HoraEntrada - 12:30)
                 if entrada_min > 0:
                     minutos_mañana = (12 * 60 + 30) - entrada_min
-                    return minutos_mañana, None
+                    return max(0, minutos_mañana), None
                 else:
                     alerta = f"{nombre} - Día {numero_dia} ({dia_semana}): Permiso tarde pero falta HoraEntrada"
                     return 0, alerta
         
         # Caso 3: Entrada y salida normal
-        if hora_entrada and hora_salida:
+        if pd.notna(hora_entrada) and pd.notna(hora_salida) and str(hora_entrada).strip() != "" and str(hora_salida).strip() != "":
             entrada_min = HorasCalculator._hora_a_minutos(hora_entrada)
             salida_min = HorasCalculator._hora_a_minutos(hora_salida)
             minutos_trabajados = salida_min - entrada_min
-            return minutos_trabajados, None
+            return max(0, minutos_trabajados), None
         
-        # Caso 4: Falta marcación y no hay justificación
-        if not hora_entrada or not hora_salida:
-            if not hora_entrada:
+        # Caso 4: Falta marcación o celdas vacías (Evaluando si es día libre/no hábil)
+        if not hora_entrada or not hora_salida or pd.isna(hora_entrada) or pd.isna(hora_salida):
+            obs_lower = str(observacion).strip().lower()
+            dia_lower = str(dia_semana).strip().lower()
+            
+            # Si explícitamente es un día No Hábil o fin de semana, retorna neutral (0 minutos trabajados, sin alertas)
+            if "no hábil" in obs_lower or "no habil" in obs_lower or "sabado" in dia_lower or "sábado" in dia_lower or "domingo" in dia_lower:
+                return 0, None
+            
+            # Si es un día laboral normal sin marcas, genera alerta de ausencia
+            if not hora_entrada or pd.isna(hora_entrada):
                 alerta = f"{nombre} - Día {numero_dia} ({dia_semana}): Falta HoraEntrada"
             else:
                 alerta = f"{nombre} - Día {numero_dia} ({dia_semana}): Falta HoraSalida"
@@ -152,8 +160,6 @@ class HorasCalculator:
         Retorna: (es_parcial, días_esperados, meta_horas_minutos)
         """
         dias_en_semana = df_semana['DiaPalabra'].astype(str).str.lower().tolist()
-        
-        # Obtener los números de días
         numeros_dias = sorted(df_semana['Número'].tolist())
         
         if not numeros_dias:
@@ -162,18 +168,14 @@ class HorasCalculator:
         # Detectar si es primera semana (no empieza en lunes)
         es_primera_semana = 'lunes' not in dias_en_semana[0].lower() if dias_en_semana else False
         
-        # Detectar si es última semana (no termina en viernes o menos de 5 días)
+        # Detectar si es última semana (menos de 5 días en los registros generales)
         es_ultima_semana = len(dias_en_semana) < 5
         
         if es_primera_semana or es_ultima_semana:
-            # Calcular meta según días reales
             meta_minutos = 0
             for _, row in df_semana.iterrows():
-                dia_semana = str(row['DiaSemana']).strip().lower()
-                if "viernes" in dia_semana:
-                    meta_minutos += 8 * 60
-                else:
-                    meta_minutos += 9 * 60
+                # Calcula la meta día por día usando la lógica corregida que omite fines de semana
+                meta_minutos += HorasCalculator._obtener_horas_esperadas(row['DiaSemana'])
             
             return True, len(dias_en_semana), meta_minutos
         
@@ -193,7 +195,7 @@ class HorasCalculator:
             'semanas': {},
             'total_minutos_mes': 0,
             'alertas': [],
-            'dias_por_semana': {}  # Para almacenar detalles de días
+            'dias_por_semana': {}
         }
         
         # Agrupar por semana
@@ -203,7 +205,7 @@ class HorasCalculator:
             
             df_semana = df_empleado[df_empleado['Semana'] == semana_num].sort_values('Número')
             
-            # Detectar si es semana parcial
+            # Detectar si es semana parcial y obtener su meta ajustada
             es_parcial, dias_esperados, meta_minutos = HorasCalculator._es_semana_parcial(
                 df_semana, semana_num, df_empleado
             )
@@ -220,24 +222,21 @@ class HorasCalculator:
                 if alerta:
                     resultados['alertas'].append(alerta)
                 
-                # Información detallada del día
-                dia_numero = row['Número']
-                dia_semana = row['DiaSemana']
-                hora_entrada = row['HoraEntrada']
-                hora_salida = row['HoraSalida']
-                observacion = row['Observacion']
-                
                 dias_info.append({
-                    'día': dia_semana,
-                    'número': dia_numero,
-                    'hora_entrada': hora_entrada,
-                    'hora_salida': hora_salida,
+                    'día': row['DiaSemana'],
+                    'número': row['Número'],
+                    'hora_entrada': row.get('HoraEntrada', ''),
+                    'hora_salida': row.get('HoraSalida', ''),
                     'minutos': minutos_dia,
-                    'acumulado': acumulado,
-                    'observacion': observacion
+                    'acumulado': acumulaged,
+                    'observacion': row.get('Observacion', '')
                 })
             
-            # Calcular diferencia semanal
+            # Si no es semana parcial de borde de mes, se le asigna la meta estándar de 44 horas semanales
+            if not es_parcial:
+                meta_minutos = 44 * 60
+            
+            # Calcular diferencia semanal real
             diferencia_minutos = minutos_semana - meta_minutos
             
             resultados['semanas'][int(semana_num)] = {
@@ -262,7 +261,7 @@ class HorasCalculator:
         resultados_todos = {}
         alertas_globales = []
         
-        # Agrupar por nombre
+        # Agrupar por nombre normalizado
         for nombre_unico in df_hoja1['Nombre_Normalizado'].unique():
             df_empleado = df_hoja1[df_hoja1['Nombre_Normalizado'] == nombre_unico]
             
@@ -272,7 +271,6 @@ class HorasCalculator:
             gerencia_match = df_hoja2[df_hoja2['Nombre_Normalizado'] == nombre_unico]
             if len(gerencia_match) > 0:
                 resultado['gerencia'] = gerencia_match['GERENCIA'].iloc[0]
-                # Buscar C_Juridica
                 c_juridica = df_empleado['C_Juridica'].iloc[0] if 'C_Juridica' in df_empleado.columns else 'N/A'
                 resultado['c_juridica'] = c_juridica
             else:
