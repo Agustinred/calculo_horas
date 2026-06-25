@@ -68,6 +68,7 @@ if not archivos_subidos:
 
 # Procesamiento de la Base de Permisos Externa con Columna O ('FechaInicio')
 df_permisos_dict = {}
+debug_df_permisos = pd.DataFrame()  # Para diagnóstico
 
 if uploaded_file_permisos:
     try:
@@ -91,13 +92,15 @@ if uploaded_file_permisos:
         # Forzar la lectura estricta y remover zonas horarias para evitar desfases de días
         if 'FechaInicio' in df_p.columns:
             fechas_transformadas = pd.to_datetime(df_p['FechaInicio'], errors='coerce')
-            # Si tiene zona horaria, quitarla para evitar que mueva el día
             if fechas_transformadas.dt.tz is not None:
                 fechas_transformadas = fechas_transformadas.dt.tz_convert(None)
             df_p['Fecha_Str'] = fechas_transformadas.dt.strftime('%Y-%m-%d')
         else:
             st.sidebar.error("⚠️ No se encontró la columna 'FechaInicio' en el archivo de permisos.")
             df_p['Fecha_Str'] = None
+        
+        # Guardar copia para la tabla de diagnóstico inferior
+        debug_df_permisos = df_p.copy()
         
         # Poblar diccionario optimizado de mapeo
         for _, row in df_p.iterrows():
@@ -370,7 +373,7 @@ if len(funcionarios_filtrados) > 0:
                     idx = columnas.index('Observación')
                     df_detalle.insert(idx, 'Permiso Externo (Horas)', horas_permiso_lista)
                 else:
-                    df_detalle['Permiso Externo (Horas)', horas_permiso_lista]
+                    df_detalle['Permiso Externo (Horas)'] = horas_permiso_lista
                 
                 st.dataframe(df_detalle, use_container_width=True, hide_index=True)
                 st.markdown("---")
@@ -409,3 +412,39 @@ with col3:
         "text/html",
         use_container_width=True
     )
+
+# =====================================================================
+# 🛠️ SECCIÓN DE DIAGNÓSTICO DE ERRORES (TEMPORAL) 🛠️
+# =====================================================================
+st.markdown("---")
+st.subheader("🛠️ Panel de Diagnóstico e Inspección de Datos")
+with st.expander("🔎 Haz clic aquí para ver por qué no se cruzan los datos de Claudia Abarca"):
+    
+    st.write("### 1. Datos cargados en el Archivo de Asistencia (Hoja 1):")
+    if 'df_h1' in locals():
+        # Filtrar registros que contengan CLAUDIA ABARCA en la asistencia
+        df_asist_claudia = df_h1[df_h1['Nombre_Normalizado'].str.contains('CLAUDIA', na=False)]
+        if not df_asist_claudia.empty:
+            st.write("**Nombre Normalizado detectado en Asistencia:**", df_asist_claudia['Nombre_Normalizado'].iloc[0])
+            st.write("**Muestra de filas encontradas en Asistencia:**")
+            st.dataframe(df_asist_claudia[['Nombre', 'Nombre_Normalizado', 'Fecha', 'DiaSemana']].head(5))
+        else:
+            st.error("❌ No se encontró a nadie con el nombre 'CLAUDIA' en el Archivo de Asistencia (Hoja 1). Verifica que esté escrito igual.")
+            
+    st.write("### 2. Datos cargados en el Archivo de Permisos (Opcional):")
+    if not debug_df_permisos.empty:
+        # Filtrar registros que contengan CLAUDIA en los permisos
+        df_perm_claudia = debug_df_permisos[debug_df_permisos['Nombre_Normalizado'].str.contains('CLAUDIA', na=False)]
+        if not df_perm_claudia.empty:
+            st.write("**Nombre Normalizado detectado en Permisos:**", df_perm_claudia['Nombre_Normalizado'].iloc[0])
+            st.write("**Datos crudos leídos del Excel de Permisos:**")
+            st.dataframe(df_perm_claudia[['Nombres', 'ApellidoPaterno', 'ApellidoMaterno', 'Nombre_Normalizado', 'FechaInicio', 'Fecha_Str', 'CantidadEnHora']])
+        else:
+            st.error("❌ No se encontró ningún registro para 'CLAUDIA' en el Archivo de Permisos.")
+    else:
+        st.warning("⚠️ No se ha cargado ningún archivo de permisos aún o está completamente vacío.")
+
+    st.write("### 3. Inspección de Diccionario de Claves Generadas (Llaves del Mapa):")
+    if df_permisos_dict:
+        st.write("Estas son las claves actuales guardadas en memoria para el cruce `(Funcionario, Fecha_Str)`. Compara si coinciden con los datos de arriba:")
+        st.write(list(df_permisos_dict.keys())[:15])
