@@ -91,7 +91,7 @@ if uploaded_file_permisos:
         df_p['ApellidoPaterno'] = df_p['ApellidoPaterno'].fillna('').astype(str).str.strip()
         df_p['ApellidoMaterno'] = df_p['ApellidoMaterno'].fillna('').astype(str).str.strip()
         
-        # 🧩 CONCATENACIÓN SOLICITADA: Nombres + ApellidoPaterno + ApellidoMaterno
+        # 🧩 CONCATENACIÓN: Nombres + ApellidoPaterno + ApellidoMaterno
         df_p['Nombre_Completo_Raw'] = (
             df_p['Nombres'] + " " + 
             df_p['ApellidoPaterno'] + " " + 
@@ -108,7 +108,7 @@ if uploaded_file_permisos:
                 fechas_transformadas = fechas_transformadas.dt.tz_convert(None)
             df_p['Fecha_Str'] = fechas_transformadas.dt.strftime('%Y-%m-%d')
         else:
-            st.sidebar.error("⚠️ No se encontró la columna 'FechaInicio' in el archivo de permisos.")
+            st.sidebar.error("⚠️ No se encontró la columna 'FechaInicio' en el archivo de permisos.")
             df_p['Fecha_Str'] = None
         
         # Guardar copia para la tabla de diagnóstico inferior
@@ -296,7 +296,6 @@ if len(funcionarios_filtrados) > 0:
                 break
         
         if resultado_funcionario:
-            # Re-normalizar el nombre seleccionado usando el nuevo estándar estricto
             nombre_norm_func = normalizar_texto_local(resultado_funcionario['nombre'])
             
             col1, col2, col3 = st.columns(3)
@@ -365,7 +364,7 @@ if len(funcionarios_filtrados) > 0:
                 
                 df_detalle = Formatter.crear_df_detalle_semana(semana_info['días'])
                 
-                # 🔄 INYECCIÓN DE PERMISOS EXTERNOS CON LA NUEVA LLAVE NORMALIZADA
+                # 🔄 INYECCIÓN CORREGIDA DE PERMISOS EXTERNOS (Unificado a minutos_p)
                 horas_permiso_lista = []
                 for _, row_dia in df_detalle.iterrows():
                     try:
@@ -375,7 +374,7 @@ if len(funcionarios_filtrados) > 0:
                         fecha_busqueda = ""
                         
                     minutos_p = df_permisos_dict.get((nombre_norm_func, fecha_busqueda), 0)
-                    if minutes_p > 0:
+                    if minutos_p > 0:
                         horas_permiso_lista.append(f"⏱️ {minutos_p // 60:02d}:{minutos_p % 60:02d}")
                     else:
                         horas_permiso_lista.append("00:00")
@@ -426,7 +425,7 @@ with col3:
     )
 
 # =====================================================================
-# 🛠️ PANEL DE DIAGNÓSTICO ULTRA DETALLADO (BÚSQUEDA GENERAL POR APELLIDO) 🛠️
+# 🛠️ PANEL DE DIAGNÓSTICO ULTRA DETALLADO 🛠️
 # =====================================================================
 st.markdown("---")
 st.subheader("🛠️ Panel de Diagnóstico e Inspección de Datos")
