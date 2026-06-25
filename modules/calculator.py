@@ -1,5 +1,5 @@
 """
-calculator.py - Soporte para combinación PER. ADM. MAÑANA, LIC. MED. TARDE
+calculator.py - Corrección de prioridad para días justificados (Mantiene horas reales si son mayores)
 """
 
 import pandas as pd
@@ -10,7 +10,7 @@ import re
 class HorasCalculator:
     """Calcula horas trabajadas por funcionario"""
     
-    # Observaciones que cuentan como día completo
+    # Observaciones que aseguran el piso de un día completo
     JUSTIFICACIONES_COMPLETAS = [
         "licencia médica", "lic. médica", "lic med",
         "per. con goce", "permiso con goce", "con goce",
@@ -91,7 +91,7 @@ class HorasCalculator:
     @staticmethod
     def calcular_horas_dia(row):
         """
-        Calcula horas de un día específico sanitizando marcas e incorporando excepciones combinadas
+        Calcula horas de un día específico priorizando marcas reales y aplicando pisos por justificación
         """
         alerta = None
         
@@ -113,61 +113,51 @@ class HorasCalculator:
         numero_dia = row.get('Número')
         nombre = row.get('Nombre', '')
         
-        # Caso 1: Justificación completa (vacaciones, licencia, PER. COMPL. DÍA, JUSTIFICADO)
-        if HorasCalculator._es_justificacion_completa(observacion):
-            horas_esperadas = HorasCalculator._obtener_horas_esperadas(dia_semana)
-            return horas_esperadas, None
+        horas_esperadas = HorasCalculator._obtener_horas_esperadas(dia_semana)
         
-        # Caso 2: Justificación parcial (Mañana o Tarde)
-        just_parcial = HorasCalculator._obtener_justificacion_parcial(observacion)
-        if just_parcial in ["mañana", "tarde"] or "lic" in obs_lower:
-            
-            # --- NUEVA CONDICIÓN COMBINADA AQUÍ ---
-            # Si el texto contiene explícitamente la combinación de Permiso Mañana + Licencia Tarde
-            if ("permiso adm" in obs_lower or "per. adm" in obs_lower) and ("mañana" in obs_lower) and ("lic" in obs_lower) and ("tarde" in obs_lower):
-                horas_esperadas = HorasCalculator._obtener_horas_esperadas(dia_semana)
-                return horas_esperadas, None # Retorna el día completo equivalente (9h o 8h) sin alertas
-            
-            # Lógica estándar para medios días individuales
+        # 1. EVALUAR SI HAY UNA COMBINACIÓN COMPLETA PRIMERO (PER. ADM. MAÑANA + LIC. MED. TARDE)
+        if ("permiso adm" in obs_lower or "per. adm" in obs_lower) and ("mañana" in obs_lower) and ("lic" in obs_lower) and ("tarde" in obs_lower):
+            return horas_esperadas, None
+
+        # 2. CALCULAR MARCAS REALES TRABAJADAS (SI EXISTEN ENTRADA Y SALIDA)
+        minutos_reales = 0
+        tiene_marcas = (hora_entrada != "" and hora_salida != "")
+        
+        if tiene_marcas:
             entrada_min = HorasCalculator._hora_a_minutos(hora_entrada)
             salida_min = HorasCalculator._hora_a_minutos(hora_salida)
+            minutos_reales = max(0, salida_min - entrada_min)
             
+        # 3. EVALUAR JUSTIFICACIÓN PARCIAL (MEDIA JORNADA)
+        just_parcial = HorasCalculator._obtener_justificacion_parcial(observacion)
+        if just_parcial in ["mañana", "tarde"]:
             if "viernes" in dia_lower:
                 minutos_bonificados = 4 * 60       
             else:
                 minutos_bonificados = (4 * 60) + 30  
             
-            minutos_complementarios = 0
-            if entrada_min > 0 and salida_min > 0:
-                minutos_complementarios = max(0, salida_min - entrada_min)
-            
-            return (minutos_bonificados + minutos_complementarios), None
+            # El tiempo es la bonificación fija de media jornada + lo trabajado extra si hay marcas
+            return (minutos_bonificados + minutos_reales), None
+
+        # 4. EVALUAR JUSTIFICACIÓN COMPLETA (LICENCIA, VACACIONES, JUSTIFICADO, PER. COMPL. DÍA)
+        if HorasCalculator._es_justificacion_completa(observacion):
+            # Si trabajó más que la jornada esperada teniendo la observación, se premia el tiempo real
+            if tiene_marcas and minutos_reales > horas_esperadas:
+                return minutos_reales, None
+            # Si no marcó o marcó menos de la meta, se asegura el piso esperado
+            return horas_esperadas, None
+
+        # 5. CASO NORMAL: SI TIENE MARCAS Y NO TIENE JUSTIFICACIONES
+        if tiene_marcas:
+            return minutos_reales, None
         
-        # Caso 3: Entrada y salida normal con datos válidos
-        if hora_entrada != "" and hora_salida != "":
-            entrada_min = HorasCalculator._hora_a_minutos(hora_entrada)
-            salida_min = HorasCalculator._hora_a_minutos(hora_salida)
-            minutos_trabajados = salida_min - entrada_min
-            return max(0, minutes_trabajados if 'minutes_trabajados' in locals() else minutos_trabajados), None
-        
-        # Caso 4: Falta marcación o celdas vacías
+        # 6. MANEJO DE FALTAS DE MARCACIÓN Y ALERTAS
         if hora_entrada == "" or hora_salida == "":
-            
-            # Si el día está justificado de cualquier forma, es fin de semana o no hábil, NO genera alerta
-            if (
-                "no hábil" in obs_lower or 
-                "no habil" in obs_lower or 
-                "justificado" in obs_lower or 
-                "per. compl. día" in obs_lower or 
-                "per. compl. dia" in obs_lower or
-                "lic" in obs_lower or
-                "sabado" in dia_lower or 
-                "sábado" in dia_lower or 
-                "domingo" in dia_lower
-            ):
+            # Si es fin de semana o feriado explícito, es neutro
+            if "no hábil" in obs_lower or "no habil" in obs_lower or "sabado" in dia_lower or "sábado" in dia_lower or "domingo" in dia_lower:
                 return 0, None
             
-            # Si es un día laboral normal y realmente falta la marca:
+            # Disparar alertas únicamente si no tiene justificaciones registradas
             if hora_entrada == "" and hora_salida != "":
                 alerta = f"{nombre} - Día {numero_dia} ({dia_semana}): Falta HoraEntrada"
             elif hora_entrada != "" and hora_salida == "":
