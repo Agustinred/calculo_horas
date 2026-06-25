@@ -11,6 +11,15 @@ st.set_page_config(
     layout="wide"
 )
 
+# Función interna de normalización para asegurar consistencia en el cruce
+def normalizar_texto_local(texto):
+    if not texto or pd.isna(texto):
+        return ""
+    import unicodedata
+    texto = str(texto).strip().upper()
+    texto = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
+    return texto
+
 st.markdown("""
     <style>
         .title-section {
@@ -28,26 +37,93 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# Sidebar
+# Sidebar - Carga de Archivos
 st.sidebar.header("📁 Carga de Archivos")
-st.sidebar.info("Carga un archivo Excel con Hoja1 y Hoja2")
+st.sidebar.info("Carga el archivo de asistencia obligatorio y, opcionalmente, el de permisos por horas.")
 
 archivos_subidos = st.sidebar.file_uploader(
-    "Selecciona archivo(s) Excel",
+    "1. Selecciona archivo Principal Excel (Asistencia)",
     type=['xlsx', 'xls'],
-    accept_multiple_files=False
+    accept_multiple_files=False,
+    key="uploader_asistencia"
+)
+
+# Nuevo Cargador Opcional para la Base de Permisos
+uploaded_file_permisos = st.sidebar.file_uploader(
+    "2. Selecciona archivo de Permisos (Opcional)",
+    type=['xlsx', 'xls'],
+    accept_multiple_files=False,
+    key="uploader_permisos"
 )
 
 if not archivos_subidos:
-    st.info("📤 Carga un archivo Excel para comenzar")
+    st.info("📤 Carga un archivo Excel de asistencia para comenzar")
     st.markdown("""
-    **Requisitos del archivo:**
+    **Requisitos del archivo principal:**
     - Hoja1: Datos de marcación (Nombre, DiaSemana, HoraEntrada, HoraSalida, etc.)
     - Hoja2: Catálogo (NOMBRE, GERENCIA)
     """)
     st.stop()
 
-# Procesar archivo
+# Procesamiento de la Base de Permisos Externa (si existe)
+df_permisos_dict = {}
+
+if uploaded_file_permisos:
+    try:
+        df_p = pd.read_excel(uploaded_file_permisos)
+        
+        # Sanitizar columnas de nombres separados
+        df_p['Nombres'] = df_p['Nombres'].fillna('').astype(str).str.strip()
+        df_p['ApellidoPaterno'] = df_p['ApellidoPaterno'].fillna('').astype(str).str.strip()
+        df_p['ApellidoMaterno'] = df_p['ApellidoMaterno'].fillna('').astype(str).str.strip()
+        
+        # Concatenar Nombre Completo (Nombres + Apellidos)
+        df_p['Nombre_Completo_Raw'] = (
+            df_p['Nombres'] + " " + 
+            df_p['ApellidoPaterno'] + " " + 
+            df_p['ApellidoMaterno']
+        ).str.replace(r'\s+', ' ', regex=True).str.strip()
+        
+        # Normalizar string para coincidencia exacta con Hoja1
+        df_p['Nombre_Normalizado'] = df_p['Nombre_Completo_Raw'].apply(normalizar_texto_local)
+        
+        # Formatear FechaInicio a string YYYY-MM-DD
+        df_p['Fecha_Str'] = pd.to_datetime(df_p['FechaInicio'], errors='coerce').dt.strftime('%Y-%m-%d')
+        
+        # Poblar diccionario optimizado de mapeo
+        for _, row in df_p.iterrows():
+            if pd.isna(row['Fecha_Str']) or not row['Nombre_Normalizado']:
+                continue
+                
+            key = (row['Nombre_Normalizado'], row['Fecha_Str'])
+            cantidad_raw = row['CantidadEnHora']
+            minutos = 0
+            
+            if pd.notna(cantidad_raw):
+                cantidad_str = str(cantidad_raw).strip()
+                partes = cantidad_str.split(':')
+                
+                if len(partes) >= 2:
+                    try:
+                        minutos = int(partes[0]) * 60 + int(partes[1])
+                    except ValueError:
+                        minutos = 0
+                else:
+                    try:
+                        minutos = int(float(cantidad_str) * 60)
+                    except ValueError:
+                        minutos = 0
+            
+            if key in df_permisos_dict:
+                df_permisos_dict[key] += minutos
+            else:
+                df_permisos_dict[key] = minutos
+                
+        st.sidebar.success(f"📊 Se vincularon {len(df_permisos_dict)} registros de permisos.")
+    except Exception as e:
+        st.sidebar.error(f"❌ Error al procesar permisos: {e}")
+
+# Procesar archivo principal de asistencia
 archivo = archivos_subidos
 
 with st.spinner("Procesando archivo..."):
@@ -59,7 +135,6 @@ with st.spinner("Procesando archivo..."):
         st.stop()
     
     # 🛠️ SANITIZACIÓN DE DATOS ANTES DE PASAR A LA CALCULADORA 🛠️
-    # Forzamos que 'DiaSemana' contenga el texto de 'DiaPalabra' para que la lógica 8/9 horas funcione.
     if 'DiaPalabra' in df_h1.columns:
         df_h1['DiaSemana'] = df_h1['DiaPalabra'].astype(str)
     else:
@@ -67,12 +142,16 @@ with st.spinner("Procesando archivo..."):
         if 'diapalabra' in columnas_lower:
             df_h1['DiaSemana'] = df_h1[columnas_lower['diapalabra']].astype(str)
             
-    # Limpieza de celdas vacías y espacios en blanco invisibles en Observaciones
     if 'Observacion' in df_h1.columns:
         df_h1['Observacion'] = df_h1['Observacion'].fillna('').astype(str).str.strip()
+        
+    if 'Nombre_Normalizado' not in df_h1.columns:
+        df_h1['Nombre_Normalizado'] = df_h1['Nombre'].apply(normalizar_texto_local)
+    if 'Nombre_Normalizado' not in df_h2.columns:
+        df_h2['Nombre_Normalizado'] = df_h2['NOMBRE'].apply(normalizar_texto_local) if 'NOMBRE' in df_h2.columns else df_h2['Nombre'].apply(normalizar_texto_local)
     
-    # Procesamiento con datos limpios
-    resultados, alertas = HorasCalculator.procesar_todos(df_h1, df_h2)
+    # Procesamiento con datos limpios y diccionario de permisos mapeado
+    resultados, alertas = HorasCalculator.procesar_todos(df_h1, df_h2, dict_permisos=df_permisos_dict)
 
 st.success("✅ Archivo cargado correctamente")
 
@@ -128,7 +207,6 @@ df_resumen = Formatter.crear_df_resumen(
     filtro_juridica=filtro_juridica if filtro_juridica else None
 )
 
-# Aplicar filtro de nombre
 if filtro_nombre:
     df_resumen = df_resumen[df_resumen['Nombre'].isin(filtro_nombre)]
 
@@ -155,7 +233,6 @@ total_minutos_faltantes = sum([r['total_minutos_mes'] for r in resultados.values
 with col1:
     st.metric("Total Empleados", total_empleados)
 with col2:
-    porcentaje = (empleados_completos / total_empleados * 100) if total_empleados > 0 else 0
     st.metric("Cumplimiento", f"{empleados_completos}/{total_empleados}")
 with col3:
     st.metric("Incompletos", empleados_incompletos)
@@ -203,12 +280,10 @@ if len(funcionarios_filtrados) > 0:
                 
                 st.metric("Total Mes", f"{estado} {texto_total}")
             
-            # SELECTOR DE SEMANA
             st.markdown("---")
             st.markdown("**📋 Detalles de Horas:**")
             
             semanas_disponibles = sorted(resultado_funcionario['semanas'].keys())
-            
             col1, col2 = st.columns([2, 1])
             
             with col1:
@@ -229,7 +304,6 @@ if len(funcionarios_filtrados) > 0:
             else:
                 semanas_a_mostrar = semanas_disponibles
             
-            # MOSTRAR DETALLE DE SEMANAS
             for semana_num in semanas_a_mostrar:
                 semana_info = resultado_funcionario['semanas'][semana_num]
                 diferencia = semana_info['diferencia_minutos']
@@ -253,7 +327,6 @@ if len(funcionarios_filtrados) > 0:
                 
                 df_detalle = Formatter.crear_df_detalle_semana(semana_info['días'])
                 st.dataframe(df_detalle, use_container_width=True, hide_index=True)
-                
                 st.markdown("---")
 
 # EXPORTACIÓN
