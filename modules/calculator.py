@@ -241,7 +241,7 @@ class HorasCalculator:
                     'número': row['Número'],
                     'hora_entrada': row.get('HoraEntrada', ''),
                     'hora_salida': row.get('HoraSalida', ''),
-                    'minutos': minutes_dia if 'minutes_dia' in locals() else minutos_dia,
+                    'minutos': minutos_dia,
                     'acumulado': acumulado,
                     'observacion': row.get('Observacion', '')
                 })
