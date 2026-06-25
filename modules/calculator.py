@@ -1,5 +1,5 @@
 """
-calculator.py - Corrección de alertas falsas para días Justificados o Permisos Completos
+calculator.py - Soporte para combinación PER. ADM. MAÑANA, LIC. MED. TARDE
 """
 
 import pandas as pd
@@ -91,7 +91,7 @@ class HorasCalculator:
     @staticmethod
     def calcular_horas_dia(row):
         """
-        Calcula horas de un día específico sanitizando marcas para evitar alertas falsas
+        Calcula horas de un día específico sanitizando marcas e incorporando excepciones combinadas
         """
         alerta = None
         
@@ -105,7 +105,11 @@ class HorasCalculator:
         if hora_salida.lower() in ['none', 'nan', 'nat', '']: hora_salida = ""
         
         observacion = row.get('Observacion', '')
+        obs_lower = str(observacion).strip().lower() if pd.notna(observacion) else ""
+        
         dia_semana = row.get('DiaSemana', '')
+        dia_lower = str(dia_semana).strip().lower()
+        
         numero_dia = row.get('Número')
         nombre = row.get('Nombre', '')
         
@@ -116,10 +120,17 @@ class HorasCalculator:
         
         # Caso 2: Justificación parcial (Mañana o Tarde)
         just_parcial = HorasCalculator._obtener_justificacion_parcial(observacion)
-        if just_parcial in ["mañana", "tarde"]:
+        if just_parcial in ["mañana", "tarde"] or "lic" in obs_lower:
+            
+            # --- NUEVA CONDICIÓN COMBINADA AQUÍ ---
+            # Si el texto contiene explícitamente la combinación de Permiso Mañana + Licencia Tarde
+            if ("permiso adm" in obs_lower or "per. adm" in obs_lower) and ("mañana" in obs_lower) and ("lic" in obs_lower) and ("tarde" in obs_lower):
+                horas_esperadas = HorasCalculator._obtener_horas_esperadas(dia_semana)
+                return horas_esperadas, None # Retorna el día completo equivalente (9h o 8h) sin alertas
+            
+            # Lógica estándar para medios días individuales
             entrada_min = HorasCalculator._hora_a_minutos(hora_entrada)
             salida_min = HorasCalculator._hora_a_minutos(hora_salida)
-            dia_lower = str(dia_semana).strip().lower()
             
             if "viernes" in dia_lower:
                 minutos_bonificados = 4 * 60       
@@ -137,21 +148,19 @@ class HorasCalculator:
             entrada_min = HorasCalculator._hora_a_minutos(hora_entrada)
             salida_min = HorasCalculator._hora_a_minutos(hora_salida)
             minutos_trabajados = salida_min - entrada_min
-            return max(0, minutos_trabajados), None
+            return max(0, minutes_trabajados if 'minutes_trabajados' in locals() else minutos_trabajados), None
         
         # Caso 4: Falta marcación o celdas vacías
         if hora_entrada == "" or hora_salida == "":
-            obs_lower = str(observacion).strip().lower()
-            dia_lower = str(dia_semana).strip().lower()
             
-            # --- NUEVA EXCEPCIÓN AQUÍ ---
-            # Si el día está justificado, es permiso completo, fin de semana o no hábil, NO genera alerta
+            # Si el día está justificado de cualquier forma, es fin de semana o no hábil, NO genera alerta
             if (
                 "no hábil" in obs_lower or 
                 "no habil" in obs_lower or 
                 "justificado" in obs_lower or 
                 "per. compl. día" in obs_lower or 
                 "per. compl. dia" in obs_lower or
+                "lic" in obs_lower or
                 "sabado" in dia_lower or 
                 "sábado" in dia_lower or 
                 "domingo" in dia_lower
