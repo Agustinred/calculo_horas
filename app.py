@@ -141,7 +141,7 @@ if uploaded_file_permisos:
             if key in df_permisos_dict:
                 df_permisos_dict[key] += minutos
             else:
-                df_permisos_dict[key] = minutos
+                df_permisos_dict[key] = minutes
                 
         st.sidebar.success(f"✅ Se cargaron {len(df_permisos_dict)} registros de permisos basados en 'FechaInicio'.")
     except Exception as e:
@@ -364,7 +364,7 @@ if len(funcionarios_filtrados) > 0:
                 
                 df_detalle = Formatter.crear_df_detalle_semana(semana_info['días'])
                 
-                # 🔄 INYECCIÓN CORREGIDA DE PERMISOS EXTERNOS (Unificado a minutos_p)
+                # 🔄 INYECCIÓN DE PERMISOS EXTERNOS
                 horas_permiso_lista = []
                 for _, row_dia in df_detalle.iterrows():
                     try:
@@ -425,13 +425,13 @@ with col3:
     )
 
 # =====================================================================
-# 🛠️ PANEL DE DIAGNÓSTICO ULTRA DETALLADO 🛠️
+# 🛠️ PANEL DE DIAGNÓSTICO DETALLADO (CORREGIDO SIN KEYERROR) 🛠️
 # =====================================================================
 st.markdown("---")
 st.subheader("🛠️ Panel de Diagnóstico e Inspección de Datos")
-with st.expander("🔎 Haz clic aquí para ver por qué no se cruzan los datos de Claudia Abarca"):
+with st.expander("🔎 Haz clic aquí para inspeccionar las llaves de cruce"):
     
-    st.write("### 1. Inspección de Columnas y Datos en Asistencia (Hoja 1):")
+    st.write("### 1. Inspección de Datos en Asistencia (Hoja 1):")
     if 'df_h1' in locals():
         st.write("**Columnas detectadas en Hoja 1:**", list(df_h1.columns))
         
@@ -444,7 +444,9 @@ with st.expander("🔎 Haz clic aquí para ver por qué no se cruzan los datos d
                 st.success(f"🔍 ¡Encontrada en Asistencia!")
                 st.write(f"**Nombre Crudo original en Asistencia:** `{df_asist_claudia[col_a_usar].iloc[0]}`")
                 st.write(f"**Nombre Normalizado en Asistencia:** `{df_asist_claudia['Nombre_Normalizado'].iloc[0]}`")
-                st.dataframe(df_asist_claudia[[col_a_usar, 'Nombre_Normalizado', 'Fecha', 'DiaSemana']].head(3))
+                # Mostramos de forma segura usando solo las columnas que existan de verdad
+                columnas_existentes = [col_a_usar, 'Nombre_Normalizado'] + [c for c in ['Fecha', 'DiaSemana', 'DiaPalabra'] if c in df_h1.columns]
+                st.dataframe(df_asist_claudia[columnas_existentes].head(3))
             else:
                 st.error("❌ El texto 'ABARCA' no aparece indexado en la columna de asistencia.")
                 st.dataframe(df_h1.head(3))
@@ -457,8 +459,3 @@ with st.expander("🔎 Haz clic aquí para ver por qué no se cruzan los datos d
             st.write(f"**Combinación armada (Nombres + AP + AM):** `{df_perm_claudia['Nombre_Completo_Raw'].iloc[0]}`")
             st.write(f"**Nombre Normalizado en Permisos:** `{df_perm_claudia['Nombre_Normalizado'].iloc[0]}`")
             st.dataframe(df_perm_claudia[['Nombre_Completo_Raw', 'Nombre_Normalizado', 'Fecha_Str', 'CantidadEnHora']].head(3))
-
-    st.write("### 3. Comparación de llaves generadas:")
-    if df_permisos_dict:
-        st.write("Muestra de claves guardadas en el diccionario para el cruce final:")
-        st.write(list(df_permisos_dict.keys())[:10])
