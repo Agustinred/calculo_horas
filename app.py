@@ -58,6 +58,20 @@ with st.spinner("Procesando archivo..."):
             st.error(error)
         st.stop()
     
+    # 🛠️ SANITIZACIÓN DE DATOS ANTES DE PASAR A LA CALCULADORA 🛠️
+    # Forzamos que 'DiaSemana' contenga el texto de 'DiaPalabra' para que la lógica 8/9 horas funcione.
+    if 'DiaPalabra' in df_h1.columns:
+        df_h1['DiaSemana'] = df_h1['DiaPalabra'].astype(str)
+    else:
+        columnas_lower = {c.lower(): c for c in df_h1.columns}
+        if 'diapalabra' in columnas_lower:
+            df_h1['DiaSemana'] = df_h1[columnas_lower['diapalabra']].astype(str)
+            
+    # Limpieza de celdas vacías y espacios en blanco invisibles en Observaciones
+    if 'Observacion' in df_h1.columns:
+        df_h1['Observacion'] = df_h1['Observacion'].fillna('').astype(str).str.strip()
+    
+    # Procesamiento con datos limpios
     resultados, alertas = HorasCalculator.procesar_todos(df_h1, df_h2)
 
 st.success("✅ Archivo cargado correctamente")
@@ -163,7 +177,6 @@ if len(funcionarios_filtrados) > 0:
     )
     
     if funcionario_seleccionado:
-        # Encontrar el resultado del funcionario
         resultado_funcionario = None
         for nombre_norm, resultado in resultados.items():
             if resultado['nombre'] == funcionario_seleccionado:
@@ -212,7 +225,6 @@ if len(funcionarios_filtrados) > 0:
                     options=semanas_disponibles,
                     key="semana_selector"
                 )
-                
                 semanas_a_mostrar = [semana_seleccionada]
             else:
                 semanas_a_mostrar = semanas_disponibles
@@ -225,7 +237,6 @@ if len(funcionarios_filtrados) > 0:
                 meta = semana_info['minutos_esperados']
                 es_parcial = semana_info.get('es_parcial', False)
                 
-                # Header de la semana
                 color, estado = Formatter.determinar_color_semana(diferencia)
                 texto_diferencia = Formatter._minutos_a_hora_texto(diferencia)
                 texto_trabajado = Formatter._minutos_a_hora_texto(minutos_trabajados)
@@ -240,7 +251,6 @@ if len(funcionarios_filtrados) > 0:
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # Tabla detallada de días
                 df_detalle = Formatter.crear_df_detalle_semana(semana_info['días'])
                 st.dataframe(df_detalle, use_container_width=True, hide_index=True)
                 
