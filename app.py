@@ -37,42 +37,42 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# Sidebar - Carga de Archivos
+# Sidebar
 st.sidebar.header("📁 Carga de Archivos")
-st.sidebar.info("Carga el archivo de asistencia obligatorio y, opcionalmente, el de permisos por horas.")
+st.sidebar.info("Carga un archivo Excel con Hoja1 y Hoja2")
 
 archivos_subidos = st.sidebar.file_uploader(
-    "1. Selecciona archivo Principal Excel (Asistencia)",
+    "Selecciona archivo(s) Excel",
     type=['xlsx', 'xls'],
     accept_multiple_files=False,
     key="uploader_asistencia"
 )
 
-# Nuevo Cargador Opcional para la Base de Permisos
+# Nuevo Cargador Opcional para la Base de Permisos (Desagregada)
 uploaded_file_permisos = st.sidebar.file_uploader(
-    "2. Selecciona archivo de Permisos (Opcional)",
+    "Selecciona archivo de Permisos (Opcional)",
     type=['xlsx', 'xls'],
     accept_multiple_files=False,
     key="uploader_permisos"
 )
 
 if not archivos_subidos:
-    st.info("📤 Carga un archivo Excel de asistencia para comenzar")
+    st.info("📤 Carga un archivo Excel para comenzar")
     st.markdown("""
-    **Requisitos del archivo principal:**
+    **Requisitos del archivo:**
     - Hoja1: Datos de marcación (Nombre, DiaSemana, HoraEntrada, HoraSalida, etc.)
     - Hoja2: Catálogo (NOMBRE, GERENCIA)
     """)
     st.stop()
 
-# Procesamiento de la Base de Permisos Externa (si existe)
+# Procesamiento de la Base de Permisos Externa (si fue cargada)
 df_permisos_dict = {}
 
 if uploaded_file_permisos:
     try:
         df_p = pd.read_excel(uploaded_file_permisos)
         
-        # Sanitizar columnas de nombres separados
+        # Sanitizar columnas de nombres separados de la captura real
         df_p['Nombres'] = df_p['Nombres'].fillna('').astype(str).str.strip()
         df_p['ApellidoPaterno'] = df_p['ApellidoPaterno'].fillna('').astype(str).str.strip()
         df_p['ApellidoMaterno'] = df_p['ApellidoMaterno'].fillna('').astype(str).str.strip()
@@ -119,9 +119,9 @@ if uploaded_file_permisos:
             else:
                 df_permisos_dict[key] = minutos
                 
-        st.sidebar.success(f"📊 Se vincularon {len(df_permisos_dict)} registros de permisos.")
+        st.sidebar.success(f"✅ Se cargaron {len(df_permisos_dict)} registros de permisos.")
     except Exception as e:
-        st.sidebar.error(f"❌ Error al procesar permisos: {e}")
+        st.sidebar.error(f"⚠️ Nota sobre permisos: No se pudo procesar el archivo opcional ({e})")
 
 # Procesar archivo principal de asistencia
 archivo = archivos_subidos
@@ -145,13 +145,24 @@ with st.spinner("Procesando archivo..."):
     if 'Observacion' in df_h1.columns:
         df_h1['Observacion'] = df_h1['Observacion'].fillna('').astype(str).str.strip()
         
+    # Garantizar columnas de normalización en el DataFrame principal
     if 'Nombre_Normalizado' not in df_h1.columns:
         df_h1['Nombre_Normalizado'] = df_h1['Nombre'].apply(normalizar_texto_local)
+        
     if 'Nombre_Normalizado' not in df_h2.columns:
-        df_h2['Nombre_Normalizado'] = df_h2['NOMBRE'].apply(normalizar_texto_local) if 'NOMBRE' in df_h2.columns else df_h2['Nombre'].apply(normalizar_texto_local)
-    
-    # Procesamiento con datos limpios y diccionario de permisos mapeado
-    resultados, alertas = HorasCalculator.procesar_todos(df_h1, df_h2, dict_permisos=df_permisos_dict)
+        col_cat_nombre = 'NOMBRE' if 'NOMBRE' in df_h2.columns else 'Nombre'
+        if col_cat_nombre in df_h2.columns:
+            df_h2['Nombre_Normalizado'] = df_h2[col_cat_nombre].apply(normalizar_texto_local)
+
+    # 🔄 CONTROL DE EXCEPCIONES Y LLAMADA COMPATIBLE CON LA CALCULADORA 🔄
+    try:
+        # Intenta pasar el diccionario completo si la función ya fue actualizada en calculator.py
+        resultados, alertas = HorasCalculator.procesar_todos(df_h1, df_h2, dict_permisos=df_permisos_dict)
+    except TypeError:
+        # Si calculator.py no se ha actualizado todavía, procesa normalmente sin tumbar la app
+        resultados, alertas = HorasCalculator.procesar_todos(df_h1, df_h2)
+        if df_permisos_dict:
+            st.warning("⚠️ El archivo de permisos se cargó, pero `modules/calculator.py` aún no está modificado para procesarlo.")
 
 st.success("✅ Archivo cargado correctamente")
 
