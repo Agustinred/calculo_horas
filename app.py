@@ -280,9 +280,3 @@ with col3:
         "text/html",
         use_container_width=True
     )
-        "🌐 Descargar HTML",
-        html_data,
-        f"horas_{archivo.name.split('.')[0]}.html",
-        "text/html",
-        use_container_width=True
-    )
