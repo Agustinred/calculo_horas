@@ -1,5 +1,5 @@
 """
-calculator.py - Lógica de cálculo de horas trabajadas
+calculator.py - Lógica de cálculo de horas trabajadas (ACTUALIZADO)
 """
 
 import pandas as pd
@@ -146,19 +146,54 @@ class HorasCalculator:
         return 0, None
     
     @staticmethod
+    def _es_semana_parcial(df_semana, numero_semana, df_empleado_completo):
+        """
+        Detecta si una semana es parcial (inicio o fin de mes)
+        Retorna: (es_parcial, días_esperados, meta_horas_minutos)
+        """
+        dias_en_semana = df_semana['DiaSemana'].str.lower().tolist()
+        
+        # Obtener los números de días
+        numeros_dias = sorted(df_semana['Número'].tolist())
+        
+        if not numeros_dias:
+            return False, 5, 44 * 60
+        
+        # Detectar si es primera semana (no empieza en lunes)
+        es_primera_semana = 'lunes' not in dias_en_semana[0].lower() if dias_en_semana else False
+        
+        # Detectar si es última semana (no termina en viernes o menos de 5 días)
+        es_ultima_semana = len(dias_en_semana) < 5
+        
+        if es_primera_semana or es_ultima_semana:
+            # Calcular meta según días reales
+            meta_minutos = 0
+            for _, row in df_semana.iterrows():
+                dia_semana = str(row['DiaSemana']).strip().lower()
+                if "viernes" in dia_semana:
+                    meta_minutos += 8 * 60
+                else:
+                    meta_minutos += 9 * 60
+            
+            return True, len(dias_en_semana), meta_minutos
+        
+        return False, 5, 44 * 60
+    
+    @staticmethod
     def procesar_funcionario(df_empleado):
         """
         Procesa un empleado completo y calcula:
-        - Horas por semana
+        - Horas por semana (incluyendo semanas parciales)
         - Diferencia semanal
-        - Total mensual
+        - Total mensual (solo diferencias negativas)
         - Alertas
         """
         resultados = {
             'nombre': df_empleado['Nombre'].iloc[0] if len(df_empleado) > 0 else 'Desconocido',
             'semanas': {},
             'total_minutos_mes': 0,
-            'alertas': []
+            'alertas': [],
+            'dias_por_semana': {}  # Para almacenar detalles de días
         }
         
         # Agrupar por semana
@@ -166,35 +201,58 @@ class HorasCalculator:
             if pd.isna(semana_num):
                 continue
             
-            df_semana = df_empleado[df_empleado['Semana'] == semana_num]
+            df_semana = df_empleado[df_empleado['Semana'] == semana_num].sort_values('Número')
+            
+            # Detectar si es semana parcial
+            es_parcial, dias_esperados, meta_minutos = HorasCalculator._es_semana_parcial(
+                df_semana, semana_num, df_empleado
+            )
             
             minutos_semana = 0
             dias_info = []
+            acumulado = 0
             
             for _, row in df_semana.iterrows():
                 minutos_dia, alerta = HorasCalculator.calcular_horas_dia(row)
                 minutos_semana += minutos_dia
+                acumulado += minutos_dia
                 
                 if alerta:
                     resultados['alertas'].append(alerta)
                 
+                # Información detallada del día
+                dia_numero = row['Número']
+                dia_semana = row['DiaSemana']
+                hora_entrada = row['HoraEntrada']
+                hora_salida = row['HoraSalida']
+                observacion = row['Observacion']
+                
                 dias_info.append({
-                    'día': row['DiaSemana'],
-                    'número': row['Número'],
-                    'minutos': minutos_dia
+                    'día': dia_semana,
+                    'número': dia_numero,
+                    'hora_entrada': hora_entrada,
+                    'hora_salida': hora_salida,
+                    'minutos': minutos_dia,
+                    'acumulado': acumulado,
+                    'observacion': observacion
                 })
             
-            # Calcular diferencia semanal (44 horas = 2640 minutos)
-            diferencia_minutos = minutos_semana - (44 * 60)
+            # Calcular diferencia semanal
+            diferencia_minutos = minutos_semana - meta_minutos
             
             resultados['semanas'][int(semana_num)] = {
                 'minutos_trabajados': minutos_semana,
-                'minutos_esperados': 44 * 60,
+                'minutos_esperados': meta_minutos,
                 'diferencia_minutos': diferencia_minutos,
-                'días': dias_info
+                'días': dias_info,
+                'es_parcial': es_parcial
             }
             
-            resultados['total_minutos_mes'] += diferencia_minutos
+            resultados['dias_por_semana'][int(semana_num)] = dias_info
+            
+            # Sumar solo diferencias negativas al total mensual
+            if diferencia_minutos < 0:
+                resultados['total_minutos_mes'] += diferencia_minutos
         
         return resultados
     
@@ -214,7 +272,7 @@ class HorasCalculator:
             gerencia_match = df_hoja2[df_hoja2['Nombre_Normalizado'] == nombre_unico]
             if len(gerencia_match) > 0:
                 resultado['gerencia'] = gerencia_match['GERENCIA'].iloc[0]
-                # Buscar C_Juridica (suponiendo que está en la Hoja1)
+                # Buscar C_Juridica
                 c_juridica = df_empleado['C_Juridica'].iloc[0] if 'C_Juridica' in df_empleado.columns else 'N/A'
                 resultado['c_juridica'] = c_juridica
             else:
