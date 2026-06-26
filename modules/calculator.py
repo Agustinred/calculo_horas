@@ -1,310 +1,400 @@
-"""
-modules/calculator.py
-Calculador de asistencia optimizado con soporte para cruce de permisos externos por hora.
-✅ VERSIÓN FINAL: Sin código de Streamlit, solo lógica pura
-"""
-
+import streamlit as st
 import pandas as pd
-from datetime import datetime
+import io
 import re
+import unicodedata
+from modules.data_loader import DataLoader
+from modules.calculator import HorasCalculator
+from modules.formatter import Formatter
+from modules.exporter import Exporter
 
+st.set_page_config(
+    page_title="DTPM - Cálculo de Horas",
+    page_icon="⏱️",
+    layout="wide"
+)
 
-class HorasCalculator:
-    """Calcula horas trabajadas por funcionario incorporando cruces externos"""
+# 🔄 FUNCIÓN DE NORMALIZACIÓN
+def normalizar_texto_local(texto):
+    if not texto or pd.isna(texto):
+        return ""
     
-    # Observaciones que aseguran el piso de un día completo
-    JUSTIFICACIONES_COMPLETAS = [
-        "licencia médica", "lic. médica", "lic med",
-        "per. con goce", "permiso con goce", "con goce",
-        "per. compl. día", "permiso completo",
-        "permiso matrimonio", "matrimonio",
-        "vacaciones", "año nuevo", "viernes santo", "sabado santo",
-        "feriado", "día feriado", "justificado"
-    ]
+    texto = str(texto).upper()
+    texto = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
+    texto = re.sub(r'[^A-Z\s]', ' ', texto)
+    texto = re.sub(r'\s+', ' ', texto).strip()
     
-    # Observaciones que cuentan como media jornada
-    JUSTIFICACIONES_PARCIALES = {
-        "permiso adm. (mañana)": "mañana",
-        "permiso adm. (tarde)": "tarde",
-        "permiso adm mañana": "mañana",
-        "permiso adm tarde": "tarde"
-    }
-    
-    @staticmethod
-    def _hora_a_minutos(hora_str):
-        """Convierte HH:MM a minutos de forma segura"""
-        if not hora_str or pd.isna(hora_str):
-            return 0
-        hora_str = str(hora_str).strip()
-        if not hora_str or hora_str.lower() in ['none', 'nan', 'nat']:
-            return 0
-        try:
-            partes = hora_str.split(':')
-            h, m = int(partes[0]), int(partes[1])
-            return h * 60 + m
-        except:
-            return 0
-    
-    @staticmethod
-    def _minutos_a_hora(minutos):
-        """Convierte minutos a HH:MM"""
-        horas = abs(minutos) // 60
-        mins = abs(minutos) % 60
-        signo = '-' if minutos < 0 else ''
-        return f"{signo}{horas:02d}:{mins:02d}"
-    
-    @staticmethod
-    def _obtener_horas_esperadas(dia_semana):
-        """Retorna horas esperadas según día de la semana, excluyendo fines de semana"""
-        dia_semana = str(dia_semana).strip().lower()
-        if "sábado" in dia_semana or "sabado" in dia_semana or "domingo" in dia_semana:
-            return 0  
-        elif "viernes" in dia_semana:
-            return 8 * 60  
-        else:
-            return 9 * 60  
-    
-    @staticmethod
-    def _es_justificacion_completa(observacion):
-        """Verifica si la observación justifica un día completo"""
-        if not observacion or pd.isna(observacion):
-            return False
-        
-        obs_lower = str(observacion).strip().lower()
-        for justificacion in HorasCalculator.JUSTIFICACIONES_COMPLETAS:
-            if justificacion in obs_lower:
-                return True
-        return False
-    
-    @staticmethod
-    def _obtener_justificacion_parcial(observacion):
-        """Retorna tipo de justificación parcial (mañana/tarde) si aplica"""
-        if not observacion or pd.isna(observacion):
-            return None
-        
-        obs_lower = str(observacion).strip().lower()
-        for just_key, just_value in HorasCalculator.JUSTIFICACIONES_PARCIALES.items():
-            if just_key in obs_lower:
-                return just_value
-        return None
-    
-    @staticmethod
-    def calcular_horas_dia(row, fecha_completa_str=None, dict_permisos=None):
-        """
-        Calcula horas de un día específico priorizando marcas reales y aplicando pisos/cruces por justificación
-        """
-        alerta = None
-        dict_permisos = dict_permisos or {}
-        
-        hora_entrada_raw = row.get('HoraEntrada')
-        hora_salida_raw = row.get('HoraSalida')
-        
-        hora_entrada = str(hora_entrada_raw).strip() if pd.notna(hora_entrada_raw) else ""
-        hora_salida = str(hora_salida_raw).strip() if pd.notna(hora_salida_raw) else ""
-        
-        if hora_entrada.lower() in ['none', 'nan', 'nat', '']: hora_entrada = ""
-        if hora_salida.lower() in ['none', 'nan', 'nat', '']: hora_salida = ""
-        
-        observacion = row.get('Observacion', '')
-        obs_lower = str(observacion).strip().lower() if pd.notna(observacion) else ""
-        
-        dia_semana = row.get('DiaSemana', '')
-        dia_lower = str(dia_semana).strip().lower()
-        
-        numero_dia = row.get('Número')
-        nombre_normalizado = row.get('Nombre_Normalizado', row.get('Nombre', ''))
-        nombre_display = row.get('Nombre', '')
-        
-        horas_esperadas = HorasCalculator._obtener_horas_esperadas(dia_semana)
-        
-        # -------------------------------------------------------------------------
-        # 🎯 RESCATE GLOBAL E INDEPENDIENTE DE PERMISOS EXTERNOS POR HORA
-        # -------------------------------------------------------------------------
-        minutos_permiso_externo = 0
-        if fecha_completa_str:
-            try:
-                ts = pd.to_datetime(fecha_completa_str)
-                fmt_ymd = ts.strftime('%Y-%m-%d')
-                fmt_dmy = ts.strftime('%d-%m-%Y')
-                
-                llave_ymd = (nombre_normalizado, fmt_ymd)
-                llave_dmy = (nombre_normalizado, fmt_dmy)
-                
-                minutos_permiso_externo = dict_permisos.get(llave_ymd, dict_permisos.get(llave_dmy, 0))
-            except Exception as e:
-                llave_cruce = (nombre_normalizado, fecha_completa_str)
-                minutos_permiso_externo = dict_permisos.get(llave_cruce, 0)
+    return texto
 
-        # 1. EVALUAR SI HAY UNA COMBINACIÓN COMPLETA PRIMERO
-        if ("permiso adm" in obs_lower or "per. adm" in obs_lower) and ("mañana" in obs_lower) and ("lic" in obs_lower) and ("tarde" in obs_lower):
-            return horas_esperadas + minutos_permiso_externo, minutos_permiso_externo, None
-
-        # 2. CALCULAR MARCAS REALES TRABAJADAS
-        minutos_reales = 0
-        tiene_marcas = (hora_entrada != "" and hora_salida != "")
-        
-        if tiene_marcas:
-            entrada_min = HorasCalculator._hora_a_minutos(hora_entrada)
-            salida_min = HorasCalculator._hora_a_minutos(hora_salida)
-            minutos_reales = max(0, salida_min - entrada_min)
-            
-        # 3. EVALUAR JUSTIFICACIÓN PARCIAL (MEDIA JORNADA)
-        just_parcial = HorasCalculator._obtener_justificacion_parcial(observacion)
-        if just_parcial in ["mañana", "tarde"]:
-            if "viernes" in dia_lower:
-                minutos_bonificados = 4 * 60       
-            else:
-                minutos_bonificados = (4 * 60) + 30  
-            
-            total_dia = minutos_bonificados + minutos_reales + minutos_permiso_externo
-            return total_dia, minutos_permiso_externo, None
-
-        # 4. EVALUAR JUSTIFICACIÓN COMPLETA
-        if HorasCalculator._es_justificacion_completa(observacion):
-            base = max(minutos_reales, horas_esperadas) if tiene_marcas else horas_esperadas
-            return base + minutos_permiso_externo, minutos_permiso_externo, None
-
-        # 5. CASO NORMAL (TIENE MARCAS)
-        if tiene_marcas:
-            total_dia = minutos_reales + minutos_permiso_externo
-            return total_dia, minutos_permiso_externo, None
-        
-        # 6. MANEJO DE FALTAS DE MARCACIÓN
-        if hora_entrada == "" or hora_salida == "":
-            if "no hábil" in obs_lower or "no habil" in obs_lower or "sabado" in dia_lower or "sábado" in dia_lower or "domingo" in dia_lower:
-                return minutos_permiso_externo, minutos_permiso_externo, None
-            
-            if hora_entrada == "" and hora_salida != "":
-                alerta = f"{nombre_display} - Día {numero_dia} ({dia_semana}): Falta HoraEntrada"
-            elif hora_entrada != "" and hora_salida == "":
-                alerta = f"{nombre_display} - Día {numero_dia} ({dia_semana}): Falta HoraSalida"
-            elif hora_entrada == "" and hora_salida == "":
-                if minutos_permiso_externo > 0:
-                    return minutos_permiso_externo, minutos_permiso_externo, None
-                alerta = f"{nombre_display} - Día {numero_dia} ({dia_semana}): Falta Marcación Completa (Entrada y Salida)"
-                
-            return minutos_permiso_externo, minutos_permiso_externo, alerta
-        
-        return minutos_permiso_externo, minutos_permiso_externo, None
-    
-    @staticmethod
-    def _es_semana_parcial(df_semana, numero_semana, df_empleado_completo):
-        """
-        ✅ CORREGIDO: Detecta si una semana es parcial y calcula SOLO horas de días laborables (lunes-viernes)
-        """
-        dias_en_semana = df_semana['DiaPalabra'].astype(str).str.lower().tolist()
-        numeros_dias = sorted(df_semana['Número'].tolist())
-        
-        if not numeros_dias:
-            return False, 5, 44 * 60
-        
-        es_primera_semana = 'lunes' not in dias_en_semana[0].lower() if dias_en_semana else False
-        es_ultima_semana = len(df_semana[~df_semana['DiaPalabra'].astype(str).str.lower().str.contains('sabado|sábado|domingo')]) < 5
-        
-        if es_primera_semana or es_ultima_semana:
-            meta_minutos = 0
-            
-            # ✅ FILTRO: Solo iterar sobre días laborables (lunes a viernes)
-            df_laborables = df_semana[~df_semana['DiaPalabra'].astype(str).str.lower().str.contains('sabado|sábado|domingo')]
-            
-            for _, row in df_laborables.iterrows():
-                meta_minutos += HorasCalculator._obtener_horas_esperadas(row['DiaSemana'])
-            
-            return True, len(df_laborables), meta_minutos
-        
-        return False, 5, 44 * 60
-    
-    @staticmethod
-    def procesar_funcionario(df_empleado, dict_permisos=None):
-        """Procesa un empleado completo mapeando fechas exactas para los cruces"""
-        resultados = {
-            'nombre': df_empleado['Nombre'].iloc[0] if len(df_empleado) > 0 else 'Desconocido',
-            'semanas': {},
-            'total_minutos_mes': 0,
-            'alertas': [],
-            'dias_por_semana': {}
+st.markdown("""
+    <style>
+        .title-section {
+            border-bottom: 3px solid #1f77b4;
+            padding-bottom: 1rem;
+            margin-bottom: 2rem;
         }
+    </style>
+""", unsafe_allow_html=True)
+
+st.markdown("""
+    <div class="title-section">
+        <h1>⏱️ DTPM - Herramienta de Cálculo de Horas</h1>
+        <p>Análisis de cumplimiento horario de funcionarios</p>
+    </div>
+""", unsafe_allow_html=True)
+
+# Sidebar
+st.sidebar.header("📁 Carga de Archivos")
+st.sidebar.info("Carga un archivo Excel con Hoja1 y Hoja2")
+
+archivos_subidos = st.sidebar.file_uploader(
+    "Selecciona archivo(s) Excel",
+    type=['xlsx', 'xls'],
+    accept_multiple_files=False,
+    key="uploader_asistencia"
+)
+
+# Cargador Opcional para la Base de Permisos
+uploaded_file_permisos = st.sidebar.file_uploader(
+    "Selecciona archivo de Permisos (Opcional)",
+    type=['xlsx', 'xls'],
+    accept_multiple_files=False,
+    key="uploader_permisos"
+)
+
+if not archivos_subidos:
+    st.info("📤 Carga un archivo Excel para comenzar")
+    st.markdown("""
+    **Requisitos del archivo:**
+    - Hoja1: Datos de marcación (Nombre, DiaSemana, HoraEntrada, HoraSalida, etc.)
+    - Hoja2: Catálogo (NOMBRE, GERENCIA)
+    """)
+    st.stop()
+
+# =========================================================================
+# 🎯 PROCESAMIENTO DE LA BASE DE PERMISOS EXTERNA (SIMPLIFICADO)
+# =========================================================================
+df_permisos_dict = {}
+debug_df_permisos = pd.DataFrame()
+
+if uploaded_file_permisos:
+    try:
+        df_permisos_dict, debug_df_permisos = DataLoader.construir_dict_permisos(uploaded_file_permisos)
         
-        for semana_num in sorted(df_empleado['Semana'].unique()):
-            if pd.isna(semana_num):
-                continue
-            
-            df_semana = df_empleado[df_empleado['Semana'] == semana_num].sort_values('Número')
-            es_parcial, dias_esperados, meta_calculada = HorasCalculator._es_semana_parcial(
-                df_semana, semana_num, df_empleado
+        if df_permisos_dict:
+            st.sidebar.success(f"✅ Se cargaron {len(df_permisos_dict)} registros de permisos")
+        else:
+            st.sidebar.warning("⚠️ No se pudieron procesar permisos. Verifica el formato del archivo.")
+    except Exception as e:
+        st.sidebar.error(f"⚠️ Error al procesar permisos: {str(e)}")
+
+# =========================================================================
+# 🔍 PANEL DE DIAGNÓSTICO EN TIEMPO REAL
+# =========================================================================
+st.subheader("⚙️ Herramienta de Inspección de Cruces en Memoria")
+with st.expander("🔍 Analizar Diccionario Global de Permisos Externos", expanded=False):
+    if df_permisos_dict:
+        st.write(f"📊 **Total de registros clave construidos en memoria:** {len(df_permisos_dict)}")
+        
+        # Formulario interactivo para auditar tuplas
+        st.write("🧪 **Simulador de Búsqueda Manual de Coincidencias:**")
+        col_d1, col_d2 = st.columns(2)
+        with col_d1:
+            nombre_prueba = st.text_input(
+                "Nombre a evaluar (Normalizado):", 
+                placeholder="EJ: claudia alejandra abarca manriquez", 
+                key="diag_nom_input"
+            )
+        with col_d2:
+            fecha_prueba = st.text_input(
+                "Fecha a evaluar (AAAA-MM-DD):", 
+                placeholder="EJ: 2026-01-30", 
+                key="diag_fec_input"
             )
             
-            meta_semanal_final = meta_calculada if es_parcial else (44 * 60)
-            minutos_semana = 0
-            dias_info = []
-            acumulado = 0
+        if nombre_prueba and fecha_prueba:
+            llave_prueba = (nombre_prueba.strip().lower(), fecha_prueba.strip())
+            st.markdown("---")
+            st.write(f"🔎 *Buscando tupla:* `{llave_prueba}`")
+            if llave_prueba in df_permisos_dict:
+                minutos = df_permisos_dict[llave_prueba]
+                horas = minutos / 60
+                st.success(f"✅ ¡COINCIDENCIA ENCONTRADA! Valor: {minutos} minutos ({horas:.1f}h)")
+            else:
+                st.error("❌ La llave no existe en el diccionario.")
+        
+        st.write("📋 **Vista previa JSON de las primeras 20 llaves:**")
+        muestra_dict = {f"{k[0]} | {k[1]}": f"{v} mins ({v/60:.1f}h)" for k, v in list(df_permisos_dict.items())[:20]}
+        st.json(muestra_dict)
+    else:
+        st.info("💡 No hay datos en el diccionario de permisos. Carga un archivo de permisos para poblar el inspector.")
+
+st.markdown("---")
+
+# =========================================================================
+# 🔄 PROCESAMIENTO DE ARCHIVOS PRINCIPALES
+# =========================================================================
+archivo = archivos_subidos
+
+# Cargar datos
+df_hoja1, df_hoja2, fecha_mes, errores = DataLoader.cargar_excel(archivo)
+
+if errores:
+    for error in errores:
+        st.error(error)
+    st.stop()
+
+# Procesar todos los funcionarios
+resultados, alertas = HorasCalculator.procesar_todos(df_hoja1, df_hoja2, dict_permisos=df_permisos_dict)
+
+# Crear resumen
+df_resumen = Formatter.crear_df_resumen(resultados)
+
+st.subheader("📊 Resumen General")
+st.dataframe(df_resumen, use_container_width=True, hide_index=True)
+
+# =========================================================================
+# 📋 VISTA DETALLADA POR FUNCIONARIO
+# =========================================================================
+st.subheader("👤 Detalles por Funcionario")
+
+# Selector de filtro
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    filtro_gerencia = st.multiselect(
+        "Filtrar por Gerencia:",
+        options=sorted(df_resumen['Gerencia'].unique()),
+        key="filtro_gerencia"
+    )
+
+with col2:
+    orden = st.radio(
+        "Ordenar por:",
+        options=["Nombre", "Diferencia Mes"],
+        horizontal=True,
+        key="orden_selector"
+    )
+
+# Aplicar filtros
+if filtro_gerencia:
+    df_filtrado = df_resumen[df_resumen['Gerencia'].isin(filtro_gerencia)]
+else:
+    df_filtrado = df_resumen
+
+# Ordenar
+if orden == "Diferencia Mes":
+    df_filtrado = df_filtrado.sort_values('Diferencia Mes')
+else:
+    df_filtrado = df_filtrado.sort_values('Nombre')
+
+funcionarios_filtrados = df_filtrado['Nombre'].unique().tolist()
+
+if funcionarios_filtrados:
+    funcionario_seleccionado = st.selectbox(
+        "Selecciona un funcionario:",
+        options=funcionarios_filtrados,
+        key="funcionario_selector"
+    )
+    
+    if funcionario_seleccionado:
+        resultado_funcionario = None
+        for nombre_norm, resultado in resultados.items():
+            if resultado['nombre'] == funcionario_seleccionado:
+                resultado_funcionario = resultado
+                break
+        
+        if resultado_funcionario:
+            nombre_norm_func = DataLoader.normalizar_texto(resultado_funcionario['nombre'])
             
-            for _, row in df_semana.iterrows():
-                fecha_str = None
-                if 'Fecha' in row and pd.notna(row['Fecha']):
-                    try:
-                        fecha_str = pd.to_datetime(row['Fecha']).strftime('%Y-%m-%d')
-                    except:
-                        fecha_str = str(row['Fecha']).split()[0]
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("Gerencia", resultado_funcionario.get('gerencia', 'N/A'))
+            with col2:
+                st.metric("Calidad Jurídica", resultado_funcionario.get('c_juridica', 'N/A'))
+            with col3:
+                total_mes = resultado_funcionario['total_minutos_mes']
+                texto_total = Formatter._minutos_a_hora_texto(total_mes)
                 
-                minutos_dia, minutos_externos, alerta = HorasCalculator.calcular_horas_dia(
-                    row, fecha_completa_str=fecha_str, dict_permisos=dict_permisos
+                if total_mes <= -60:
+                    estado = "❌"
+                elif total_mes < 0:
+                    estado = "⚠️"
+                else:
+                    estado = "✅"
+                
+                st.metric("Total Mes", f"{estado} {texto_total}")
+            
+            st.markdown("---")
+            st.markdown("**📋 Detalles de Horas:**")
+            
+            semanas_disponibles = sorted(resultado_funcionario['semanas'].keys())
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                opcion_vista = st.radio(
+                    "Vista:",
+                    options=["Seleccionar Semana", "Ver Todas las Semanas"],
+                    horizontal=True,
+                    key="opcion_vista"
+                )
+            
+            if opcion_vista == "Seleccionar Semana":
+                semana_seleccionada = st.selectbox(
+                    "Semana:",
+                    options=semanas_disponibles,
+                    key="semana_selector"
+                )
+                semanas_a_mostrar = [semana_seleccionada]
+            else:
+                semanas_a_mostrar = semanas_disponibles
+            
+            for semana_num in semanas_a_mostrar:
+                semana_info = resultado_funcionario['semanas'][semana_num]
+                diferencia = semana_info['diferencia_minutos']
+                minutos_trabajados = semana_info['minutos_trabajados']
+                meta = semana_info['minutos_esperados']
+                es_parcial = semana_info.get('es_parcial', False)
+                
+                color, estado = Formatter.determinar_color_semana(diferencia)
+                texto_diferencia = Formatter._minutos_a_hora_texto(diferencia)
+                texto_trabajado = Formatter._minutos_a_hora_texto(minutos_trabajados)
+                texto_meta = Formatter._minutos_a_hora_texto(meta)
+                
+                marca_parcial = " (Semana Parcial)" if es_parcial else ""
+                
+                st.markdown(f"""
+                <div style="background-color: {color}; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+                    <h4>Semana {semana_num}{marca_parcial}</h4>
+                    <p><strong>Trabajadas:</strong> {texto_trabajado} | <strong>Meta:</strong> {texto_meta} | <strong>Diferencia:</strong> {texto_diferencia} {estado}</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                df_detalle = Formatter.crear_df_detalle_semana(semana_info['días'])
+                
+                # ====================================================================================
+                # 🔬 DETECTOR DE CRUCES DE PERMISOS CON DIAGNÓSTICO
+                # ✅ CORREGIDO: Extrae correctamente el número del día (segundo número)
+                # ====================================================================================
+                horas_permiso_lista = []
+                diagnostico_llaves_intentadas = []
+                diagnostico_estado_cruce = []
+
+                # Obtener datos de días desde resultado_funcionario
+                lista_dias_interna = (
+                    resultado_funcionario.get('dias_por_semana', {}).get(semana_num, []) or 
+                    resultado_funcionario.get('dias_por_semana', {}).get(str(semana_num), [])
                 )
                 
-                minutos_semana += minutos_dia
-                acumulado += minutos_dia
-                
-                if alerta:
-                    resultados['alertas'].append(alerta)
-                
-                dias_info.append({
-                    'día': row['DiaSemana'],
-                    'número': row['Número'],
-                    'hora_entrada': row.get('HoraEntrada', ''),
-                    'hora_salida': row.get('HoraSalida', ''),
-                    'minutos': minutos_dia,
-                    'acumulado': acumulado,
-                    'minutos_externos': minutos_externos,
-                    'observacion': row.get('Observacion', ''),
-                    'Fecha': fecha_str
-                })
-            
-            diferencia_minutos = minutos_semana - meta_semanal_final
-            resultados['semanas'][int(semana_num)] = {
-                'minutos_trabajados': minutos_semana,
-                'minutos_esperados': meta_semanal_final,
-                'diferencia_minutos': diferencia_minutos,
-                'días': dias_info,
-                'es_parcial': es_parcial
-            }
-            resultados['dias_por_semana'][int(semana_num)] = dias_info
-            
-            if diferencia_minutos < 0:
-                resultados['total_minutos_mes'] += diferencia_minutos
-        
-        return resultados
+                # Mapeo: número_día → datos_día (para búsqueda rápida)
+                mapa_dias = {int(dia['número']): dia for dia in lista_dias_interna}
 
-    @staticmethod
-    def procesar_todos(df_hoja1, df_hoja2, dict_permisos=None):
-        """Procesa todos los empleados del mes aplicando el diccionario de permisos corregido"""
-        resultados_todos = {}
-        alertas_globales = []
-        
-        for nombre_unico in df_hoja1['Nombre_Normalizado'].unique():
-            df_empleado = df_hoja1[df_hoja1['Nombre_Normalizado'] == nombre_unico]
-            
-            resultado = HorasCalculator.procesar_funcionario(df_empleado, dict_permisos=dict_permisos)
-            
-            gerencia_match = df_hoja2[df_hoja2['Nombre_Normalizado'] == nombre_unico]
-            if len(gerencia_match) > 0:
-                resultado['gerencia'] = gerencia_match['GERENCIA'].iloc[0]
-                c_juridica = df_empleado['C_Juridica'].iloc[0] if 'C_Juridica' in df_empleado.columns else 'N/A'
-                resultado['c_juridica'] = c_juridica
+                for idx, fila in df_detalle.iterrows():
+                    minutos_p = 0
+                    llave_buscada = "N/A"
+                    estado_rastreo = "❌ No se pudo determinar fecha"
+                    
+                    texto_dia_columna = str(fila.get('Día', '')).upper()
+                    
+                    # ✅ CORRECCIÓN: Extraer el SEGUNDO número (número del día del mes)
+                    numeros = re.findall(r'\d+', texto_dia_columna)
+                    dia_mes = None
+                    
+                    if len(numeros) >= 2:
+                        dia_mes = int(numeros[1])  # Segundo número (día del mes)
+                    elif len(numeros) == 1:
+                        dia_mes = int(numeros[0])  # Solo hay un número
+                    
+                    if dia_mes:
+                        # Buscar datos del día en el mapeo
+                        if dia_mes in mapa_dias:
+                            dia_datos = mapa_dias[dia_mes]
+                            minutos_p = dia_datos.get('minutos_externos', 0)  # ✅ USA minutos_externos ya calculado
+                            fecha_real = dia_datos.get('Fecha', 'N/A')
+                            
+                            llave_buscada = f"('{nombre_norm_func}', '{fecha_real}')"
+                            
+                            if minutos_p > 0:
+                                horas_p = minutos_p / 60
+                                estado_rastreo = f"✅ PERMISO APLICADO ({minutos_p} min / {horas_p:.1f}h)"
+                            else:
+                                estado_rastreo = "✅ Sin permisos para este día"
+                        else:
+                            estado_rastreo = f"❌ Día {dia_mes} no encontrado en datos"
+                    else:
+                        estado_rastreo = "❌ No se pudo extraer número de día"
+
+                    # Formatear horas
+                    if minutos_p > 0:
+                        horas_permiso_lista.append(f"{minutos_p // 60:02d}:{minutos_p % 60:02d}")
+                    else:
+                        horas_permiso_lista.append("00:00")
+                        
+                    diagnostico_llaves_intentadas.append(llave_buscada)
+                    diagnostico_estado_cruce.append(estado_rastreo)
+
+                df_detalle['Permiso Externo (Horas)'] = horas_permiso_lista
+                df_detalle['🔬 Llave Buscada'] = diagnostico_llaves_intentadas
+                df_detalle['⚙️ Resultado del Cruce'] = diagnostico_estado_cruce
+
+                st.dataframe(df_detalle, use_container_width=True, hide_index=True)
+                st.markdown("---")
+                # ====================================================================================
+
+# EXPORTACIÓN
+st.subheader("📥 Exportar Resultados")
+
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    csv_data = Exporter.exportar_csv(df_resumen)
+    st.download_button(
+        "📄 Descargar CSV",
+        csv_data,
+        f"horas_{archivo.name.split('.')[0]}.csv",
+        "text/csv",
+        use_container_width=True
+    )
+
+with col2:
+    excel_data = Exporter.exportar_excel(df_resumen)
+    st.download_button(
+        "📊 Descargar Excel",
+        excel_data,
+        f"horas_{archivo.name.split('.')[0]}.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True
+    )
+
+with col3:
+    html_data = Exporter.exportar_html(df_resumen)
+    st.download_button(
+        "🌐 Descargar HTML",
+        html_data,
+        f"horas_{archivo.name.split('.')[0]}.html",
+        "text/html",
+        use_container_width=True
+    )
+
+# Panel de diagnóstico secundario
+st.markdown("---")
+st.subheader("🛠️ Panel de Diagnóstico Secundario")
+with st.expander("🔎 Ver detalles secundarios del funcionario seleccionado"):
+    if 'funcionario_seleccionado' in locals() and funcionario_seleccionado:
+        nombre_a_diagnosticar = DataLoader.normalizar_texto(funcionario_seleccionado)
+        if nombre_a_diagnosticar:
+            st.write(f"### Análisis enfocado en: `{nombre_a_diagnosticar}`")
+            if not debug_df_permisos.empty:
+                df_perm_filtrado = debug_df_permisos[
+                    debug_df_permisos['Nombre_Normalizado'] == nombre_a_diagnosticar
+                ]
+                if not df_perm_filtrado.empty:
+                    st.dataframe(df_perm_filtrado[[
+                        'Nombres', 'ApellidoPaterno', 'ApellidoMaterno',
+                        'Nombre_Normalizado', 'FechaInicio', 'CantidadEnHora'
+                    ]], use_container_width=True, hide_index=True)
+                else:
+                    st.info("No hay registros de permisos para este funcionario")
             else:
-                resultado['gerencia'] = 'Desconocida'
-                resultado['c_juridica'] = 'N/A'
-            
-            resultados_todos[nombre_unico] = resultado
-            alertas_globales.extend(resultado['alertas'])
-        
-        return resultados_todos, alertas_globales
+                st.info("No hay datos de permisos cargados")
