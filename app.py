@@ -114,7 +114,7 @@ if uploaded_file_permisos:
         # Guardar copia para la tabla de diagnóstico inferior
         debug_df_permisos = df_p.copy()
         
-        # Poblar diccionario optimizado de mapeo
+        # Poblar diccionario optimizado de mapeo guardando fechas exactas reales
         for _, row in df_p.iterrows():
             if pd.isna(row['Fecha_Str']) or not row['Nombre_Normalizado']:
                 continue
@@ -365,41 +365,31 @@ if len(funcionarios_filtrados) > 0:
                 df_detalle = Formatter.crear_df_detalle_semana(semana_info['días'])
                 
                 # =====================================================================
-                # 🔄 INYECCIÓN MEJORADA, RESILIENTE Y EXTRA FLEXIBLE DE PERMISOS
+                # 🔄 CRUCE EXACTO E INYECCIÓN DE PERMISOS (RESPETANDO EL MES EN CURSO)
                 # =====================================================================
                 horas_permiso_lista = []
-                for _, row_dia in df_detalle.iterrows():
+                
+                # Mapeamos los datos diarios fidedignos desde la lista interna procesada por la calculadora
+                lista_dias_interna = resultado_funcionario['dias_por_semana'][semana_num]
+                
+                for dia_datos in lista_dias_interna:
                     minutos_p = 0
-                    try:
-                        # 1. Extraer el número de día crudo (ej: "Viernes 09" -> "09")
-                        dia_str = str(row_dia['Día']).split()[-1].zfill(2)
-                        ano_actual = fecha_mes.year if fecha_mes else 2026
-                        
-                        # 2. Estrategia Iterativa: Probar todos los meses (01 al 12) para romper desfases de lectura
-                        encontrado = False
-                        for m in range(1, 13):
-                            mes_str = str(m).zfill(2)
-                            fecha_intento = f"{ano_actual}-{mes_str}-{dia_str}"
-                            
-                            if (nombre_norm_func, fecha_intento) in df_permisos_dict:
-                                minutos_p = df_permisos_dict[(nombre_norm_func, fecha_intento)]
-                                encontrado = True
-                                break
-                        
-                        # 3. Estrategia Fallback: Buscar cualquier llave que termine en el día exacto si falló la anterior
-                        if not encontrado:
-                            for key_dict in df_permisos_dict.keys():
-                                if key_dict[0] == nombre_norm_func and key_dict[1].endswith(f"-{dia_str}"):
-                                    minutos_p = df_permisos_dict[key_dict]
-                                    break
-                    except Exception:
-                        minutos_p = 0
-                        
+                    obs_dia = str(dia_datos.get('observacion', '')).strip().lower()
+                    
+                    # Ejecutar cruce de permiso únicamente si la observación del día lo indica
+                    if "per. comple. (horas)" in obs_dia or "per. comple (horas)" in obs_dia:
+                        # Recuperar fecha exacta calculada por el motor
+                        if 'Fecha' in dia_datos and pd.notna(dia_datos['Fecha']):
+                            fecha_exacta_str = pd.to_datetime(dia_datos['Fecha']).strftime('%Y-%m-%d')
+                            llave_exacta = (nombre_norm_func, fecha_exacta_str)
+                            minutos_p = df_permisos_dict.get(llave_exacta, 0)
+                    
                     if minutos_p > 0:
-                        horas_permiso_lista.append(f"⏱️ {minutos_p // 60:02d}:{minutos_p % 60:02d}")
+                        horas_permiso_lista.append(f"⏱| {minutos_p // 60:02d}:{minutos_p % 60:02d}")
                     else:
                         horas_permiso_lista.append("00:00")
                 
+                # Inyección limpia en el DataFrame visual
                 columnas = list(df_detalle.columns)
                 if 'Observación' in columnas:
                     idx = columnas.index('Observación')
@@ -452,40 +442,43 @@ st.markdown("---")
 st.subheader("🛠️ Panel de Diagnóstico e Inspección de Datos")
 with st.expander("🔎 Haz clic aquí para inspeccionar las llaves de cruce exactas"):
     
-    nombre_a_diagnosticar = normalizar_texto_local(funcionario_seleccionado) if funcionarios_filtrados else "CLAUDIA ALEJANDRA ABARCA MANRIQUEZ"
+    nombre_a_diagnosticar = normalizar_texto_local(funcionario_seleccionado) if funcionarios_filtrados else ""
     
-    st.write(f"### Análisis enfocado en: `{nombre_a_diagnosticar}`")
-    
-    st.write("### 1. Inspección de Datos en Asistencia (Hoja 1):")
-    if 'df_h1' in locals():
-        col_nombre_real = [c for c in df_h1.columns if 'nombre' in str(c).lower()]
-        if col_nombre_real:
-            col_a_usar = col_nombre_real[0]
-            df_asist_filtrado = df_h1[df_h1['Nombre_Normalizado'] == nombre_a_diagnosticar]
-            
-            if not df_asist_filtrado.empty:
-                st.success(f"🔍 ¡Funcionario encontrado de forma exacta en Asistencia!")
-                st.write(f"**Nombre Crudo original:** `{df_asist_filtrado[col_a_usar].iloc[0]}`")
-                st.write(f"**Nombre Normalizado:** `{df_asist_filtrado['Nombre_Normalizado'].iloc[0]}`")
-                columnas_existentes = [col_a_usar, 'Nombre_Normalizado'] + [c for c in ['Fecha', 'DiaSemana', 'DiaPalabra'] if c in df_h1.columns]
-                st.dataframe(df_asist_filtrado[columnas_existentes].head(5))
-            else:
-                st.error(f"❌ El nombre exacto `{nombre_a_diagnosticar}` no está en la base de asistencia.")
+    if nombre_a_diagnosticar:
+        st.write(f"### Análisis enfocado en: `{nombre_a_diagnosticar}`")
+        
+        st.write("### 1. Inspección de Datos en Asistencia (Hoja 1):")
+        if 'df_h1' in locals():
+            col_nombre_real = [c for c in df_h1.columns if 'nombre' in str(c).lower()]
+            if col_nombre_real:
+                col_a_usar = col_nombre_real[0]
+                df_asist_filtrado = df_h1[df_h1['Nombre_Normalizado'] == nombre_a_diagnosticar]
                 
-    st.write("### 2. Inspección en Archivo de Permisos:")
-    if not debug_df_permisos.empty:
-        df_perm_filtrado = debug_df_permisos[debug_df_permisos['Nombre_Normalizado'] == nombre_a_diagnosticar]
-        if not df_perm_filtrado.empty:
-            st.success(f"🔍 ¡Registros encontrados en Permisos!")
-            st.dataframe(df_perm_filtrado[['Nombre_Completo_Raw', 'Nombre_Normalizado', 'Fecha_Str', 'CantidadEnHora']])
-        else:
-            st.error(f"❌ No hay registros que coincidan exactamente con `{nombre_a_diagnosticar}` en los permisos.")
+                if not df_asist_filtrado.empty:
+                    st.success(f"🔍 ¡Funcionario encontrado de forma exacta en Asistencia!")
+                    st.write(f"**Nombre Crudo original:** `{df_asist_filtrado[col_a_usar].iloc[0]}`")
+                    st.write(f"**Nombre Normalizado:** `{df_asist_filtrado['Nombre_Normalizado'].iloc[0]}`")
+                    columnas_existentes = [col_a_usar, 'Nombre_Normalizado'] + [c for c in ['Fecha', 'DiaSemana', 'DiaPalabra'] if c in df_h1.columns]
+                    st.dataframe(df_asist_filtrado[columnas_existentes].head(5))
+                else:
+                    st.error(f"❌ El nombre exacto `{nombre_a_diagnosticar}` no está en la base de asistencia.")
+                    
+        st.write("### 2. Inspección en Archivo de Permisos:")
+        if not debug_df_permisos.empty:
+            df_perm_filtrado = debug_df_permisos[debug_df_permisos['Nombre_Normalizado'] == nombre_a_diagnosticar]
+            if not df_perm_filtrado.empty:
+                st.success(f"🔍 ¡Registros encontrados en Permisos!")
+                st.dataframe(df_perm_filtrado[['Nombre_Completo_Raw', 'Nombre_Normalizado', 'Fecha_Str', 'CantidadEnHora']])
+            else:
+                st.error(f"❌ No hay registros que coincidan exactamente con `{nombre_a_diagnosticar}` en los permisos.")
 
-    st.write("### 3. Claves activas en el diccionario de cruce:")
-    if df_permisos_dict:
-        claves_funcionario = {k: v for k, v in df_permisos_dict.items() if k[0] == nombre_a_diagnosticar}
-        if claves_funcionario:
-            st.write("Claves generadas para este funcionario (Estructura: `(Nombre, Fecha)` -> Minutos):")
-            st.json({str(k): f"{v} minutos" for k, v in claves_funcionario.items()})
-        else:
-            st.warning("No se generaron llaves válidas en el diccionario para este nombre.")
+        st.write("### 3. Claves activas en el diccionario de cruce:")
+        if df_permisos_dict:
+            claves_funcionario = {k: v for k, v in df_permisos_dict.items() if k[0] == nombre_a_diagnosticar}
+            if claves_funcionario:
+                st.write("Claves generadas para este funcionario (Estructura: `(Nombre, Fecha)` -> Minutos):")
+                st.json({str(k): f"{v} minutos" for k, v in claves_funcionario.items()})
+            else:
+                st.warning("No se generaron llaves válidas en el diccionario para este nombre.")
+    else:
+        st.info("Carga los archivos para ver el diagnóstico detallado de un funcionario.")
