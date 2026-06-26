@@ -1,1 +1,1 @@
-# Módulo para cálculo de horas
+# modules package
