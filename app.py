@@ -141,7 +141,7 @@ if uploaded_file_permisos:
             if key in df_permisos_dict:
                 df_permisos_dict[key] += minutos
             else:
-                df_permisos_dict[key] = minutos
+                df_permisos_dict[key] = minutes
                 
         st.sidebar.success(f"✅ Se cargaron {len(df_permisos_dict)} registros de permisos basados en 'FechaInicio'.")
     except Exception as e:
@@ -372,7 +372,7 @@ if len(funcionarios_filtrados) > 0:
                 )
                 semanas_a_mostrar = [semana_seleccionada]
             else:
-                semanas_a_mostrar = weeks = semanas_disponibles
+                semanas_a_mostrar = semanas_disponibles
             
             for semana_num in semanas_a_mostrar:
                 semana_info = resultado_funcionario['semanas'][semana_num]
@@ -397,33 +397,38 @@ if len(funcionarios_filtrados) > 0:
                 
                 df_detalle = Formatter.crear_df_detalle_semana(semana_info['días'])
                 
-# =====================================================================
-                # 🔄 CRUCE EXACTO E INYECCIÓN DE PERMISOS (CORREGIDO SIN DESFASES)
-                # =====================================================================
+# ====================================================================================
+                # 🔄 CRUCE EXACTO BASADO EN EL NÚMERO DE DÍA EXTRAÍDO (SOLUCIÓN AL DESFASE)
+# ====================================================================================
                 horas_permiso_lista = []
-                
-                # Crear un mapa rápido de Fecha -> Observación/Datos desde el motor de cálculo
-                mapa_fechas_calculadas = {}
                 lista_dias_interna = resultado_funcionario.get('dias_por_semana', {}).get(semana_num, [])
                 
+                # Mapeamos los días del motor de cálculo usando el día del mes extraído de su objeto de fecha real
+                mapa_dias_mes_calculados = {}
                 for dia_datos in lista_dias_interna:
                     if 'Fecha' in dia_datos and pd.notna(dia_datos['Fecha']):
-                        f_str = pd.to_datetime(dia_datos['Fecha']).strftime('%Y-%m-%d')
-                        mapa_fechas_calculadas[f_str] = dia_datos
+                        num_dia_mes = pd.to_datetime(dia_datos['Fecha']).day
+                        mapa_dias_mes_calculados[num_dia_mes] = dia_datos
 
-                # Construimos la lista de permisos alineada PERFECTAMENTE con las filas de df_detalle
+                # Iteramos el DataFrame visual (df_detalle) resolviendo el número de día de su columna 'Día'
                 for idx, fila in df_detalle.iterrows():
                     minutos_p = 0
+                    texto_dia_columna = str(fila.get('Día', ''))
                     
-                    if idx < len(lista_dias_interna):
-                        dia_datos = lista_dias_interna[idx]
-                        obs_dia = str(dia_datos.get('observacion', '')).strip().lower()
+                    # Extraer el número (por ejemplo, desde "LUNES 5" o "VIERNES 9" extrae el 5 o el 9)
+                    match_numero = re.search(r'\d+', texto_dia_columna)
+                    
+                    if match_numero:
+                        dia_mes_visual = int(match_numero.group())
                         
-                        if 'Fecha' in dia_datos and pd.notna(dia_datos['Fecha']):
-                            fecha_exacta_str = pd.to_datetime(dia_datos['Fecha']).strftime('%Y-%m-%d')
-                            llave_exacta = (nombre_norm_func, fecha_exacta_str)
+                        # Si ese número de día existe en los cálculos de esta semana, cruzamos con la base externa
+                        if dia_mes_visual in mapa_dias_mes_calculados:
+                            dia_datos = mapa_dias_mes_calculados[dia_mes_visual]
                             
-                            minutos_p = df_permisos_dict.get(llave_exacta, 0)
+                            if 'Fecha' in dia_datos and pd.notna(dia_datos['Fecha']):
+                                fecha_exacta_str = pd.to_datetime(dia_datos['Fecha']).strftime('%Y-%m-%d')
+                                llave_exacta = (nombre_norm_func, fecha_exacta_str)
+                                minutos_p = df_permisos_dict.get(llave_exacta, 0)
                     
                     if minutos_p > 0:
                         horas_permiso_lista.append(f"{minutos_p // 60:02d}:{minutos_p % 60:02d}")
