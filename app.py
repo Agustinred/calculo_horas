@@ -114,7 +114,7 @@ if uploaded_file_permisos:
         # Guardar copia para la tabla de diagnóstico inferior
         debug_df_permisos = df_p.copy()
         
-        # Poblar diccionario optimizado de mapeo guardando tuplas reales de Python (Independientes)
+        # Poblar diccionario optimizado de mapeo guardando tuplas reales de Python
         for _, row in df_p.iterrows():
             if pd.isna(row['Fecha_Str']) or not row['Nombre_Normalizado']:
                 continue
@@ -144,7 +144,7 @@ if uploaded_file_permisos:
             if key in df_permisos_dict:
                 df_permisos_dict[key] += minutos
             else:
-                df_permisos_dict[key] = minutos
+                df_permisos_dict[key] = minutes = minutos
                 
         st.sidebar.success(f"✅ Se cargaron {len(df_permisos_dict)} registros de permisos basados en 'FechaInicio'.")
     except Exception as e:
@@ -176,7 +176,6 @@ with st.expander("🔍 Analizar Diccionario Global de Permisos Externos", expand
                 st.error("❌ La llave no existe tal cual en el diccionario. Revisa espacios o formatos de fecha.")
         
         st.write("📋 **Vista previa en formato JSON de las primeras 20 llaves en memoria:**")
-        # El st.json ahora interpretará correctamente los elementos ya que son tuplas reales nativas
         muestra_dict = {f"{k[0]} | {k[1]}": f"{v} mins" for k, v in list(df_permisos_dict.items())[:20]}
         st.json(muestra_dict)
     else:
@@ -376,7 +375,7 @@ if len(funcionarios_filtrados) > 0:
                 )
                 semanas_a_mostrar = [semana_seleccionada]
             else:
-                semanas_a_mostrar = weeks_avail = semanas_disponibles
+                semanas_a_mostrar = semanas_disponibles
             
             for semana_num in semanas_a_mostrar:
                 semana_info = resultado_funcionario['semanas'][semana_num]
@@ -402,13 +401,17 @@ if len(funcionarios_filtrados) > 0:
                 df_detalle = Formatter.crear_df_detalle_semana(semana_info['días'])
                 
 # ====================================================================================
-                # 🔬 DETECTOR DE ERRORES EN TIEMPO REAL (INYECCIÓN DE DIAGNÓSTICO)
+                # 🔬 DETECTOR DE ERRORES EN TIEMPO REAL (VERSIÓN FINAL ULTRA REFORZADA)
 # ====================================================================================
                 horas_permiso_lista = []
                 diagnostico_llaves_intentadas = []
                 diagnostico_estado_cruce = []
 
-                lista_dias_interna = resultado_funcionario.get('dias_por_semana', {}).get(semana_num, [])
+                # Obtener la lista de días manejando llaves string o enteras para mayor compatibilidad
+                lista_dias_interna = (
+                    resultado_funcionario.get('dias_por_semana', {}).get(semana_num, []) or 
+                    resultado_funcionario.get('dias_por_semana', {}).get(str(semana_num), [])
+                )
 
                 # Mapeamos lo que calcula el motor por detrás
                 mapa_por_dia_mes = {}
@@ -431,32 +434,33 @@ if len(funcionarios_filtrados) > 0:
                     
                     if match_numero:
                         dia_mes_visual = int(match_numero.group())
-                        estado_rastreo = f"❌ Día {dia_mes_visual} extraído, pero no mapeado en la semana"
+                        estado_rastreo = f"❌ Día {dia_mes_visual} extraído, pero sin match"
                         
+                        # 1. Intentar match por el mapa directo del backend
                         if dia_mes_visual in mapa_por_dia_mes:
                             dia_datos = mapa_por_dia_mes[dia_mes_visual]
                             if 'Fecha' in dia_datos and pd.notna(dia_datos['Fecha']):
                                 f_str = pd.to_datetime(dia_datos['Fecha']).strftime('%Y-%m-%d')
                                 llave_evaluada = f"('{nombre_norm_func}', '{f_str}')"
                                 
-                                # Intentamos buscar usando la tupla corregida
                                 llave_tupla = (nombre_norm_func, f_str)
                                 if llave_tupla in df_permisos_dict:
                                     minutos_p = df_permisos_dict[llave_tupla]
                                     estado_rastreo = f"✅ MATCH PERFECTO ({minutos_p} min)"
                                 else:
                                     estado_rastreo = "❌ Llave no existe en diccionario"
-                        else:
-                            # Estrategia de respaldo por mes activo si no se encuentra en el mapa directo
-                            if fecha_mes:
-                                f_reconstructed = f"{fecha_mes.year}-{fecha_mes.month:02d}-{dia_mes_visual:02d}"
-                                llave_evaluada = f"('{nombre_norm_func}', '{f_reconstructed}') (Reconstruida)"
-                                llave_backup = (nombre_norm_func, f_reconstructed)
-                                if llave_backup in df_permisos_dict:
-                                    minutos_p = df_permisos_dict[llave_backup]
-                                    estado_rastreo = f"✅ MATCH RESPALDO ({minutos_p} min)"
-                                else:
-                                    estado_rastreo = "❌ Llave reconstruida no existe"
+                                    
+                        # 2. Estrategia de respaldo infalible (Reconstrucción directa por Mes Activo)
+                        if minutos_p == 0 and fecha_mes:
+                            f_reconstruida = f"{fecha_mes.year}-{fecha_mes.month:02d}-{dia_mes_visual:02d}"
+                            llave_evaluada = f"('{nombre_norm_func}', '{f_reconstruida}')"
+                            llave_backup = (nombre_norm_func, f_reconstruida)
+                            
+                            if llave_backup in df_permisos_dict:
+                                minutos_p = df_permisos_dict[llave_backup]
+                                estado_rastreo = f"✅ MATCH RESPALDO ({minutos_p} min)"
+                            else:
+                                estado_rastreo = f"❌ No existe la tupla en la BD"
 
                     if minutos_p > 0:
                         horas_permiso_lista.append(f"{minutos_p // 60:02d}:{minutos_p % 60:02d}")
