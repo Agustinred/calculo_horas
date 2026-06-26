@@ -310,7 +310,3 @@ class HorasCalculator:
             alertas_globales.extend(resultado['alertas'])
         
         return resultados_todos, alertas_globales
-
-# Un ejemplo de cómo forzar a Streamlit a mostrar el diccionario en la web:
-with st.expander("🔍 Panel de Diagnóstico de Permisos"):
-    st.write("Contenido actual del dict_permisos:", dict_permisos)
