@@ -108,7 +108,7 @@ with st.expander("🔍 Analizar Diccionario Global de Permisos Externos", expand
         with col_d2:
             fecha_prueba = st.text_input(
                 "Fecha a evaluar (AAAA-MM-DD):", 
-                placeholder="EJ: 2026-01-09", 
+                placeholder="EJ: 2026-01-30", 
                 key="diag_fec_input"
             )
             
@@ -147,8 +147,8 @@ if errores:
 # Procesar todos los funcionarios
 resultados, alertas = HorasCalculator.procesar_todos(df_hoja1, df_hoja2, dict_permisos=df_permisos_dict)
 
-# Crear resumen
-df_resumen = Formatter.crear_resumen(resultados)
+# Crear resumen - ✅ CORREGIDO: usar crear_df_resumen en lugar de crear_resumen
+df_resumen = Formatter.crear_df_resumen(resultados)
 
 st.subheader("📊 Resumen General")
 st.dataframe(df_resumen, use_container_width=True, hide_index=True)
