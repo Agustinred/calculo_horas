@@ -44,6 +44,7 @@ class HorasCalculator:
     
     @staticmethod
     def _obtener_horas_esperadas(dia_semana):
+        """Retorna horas esperadas para UN día específico"""
         dia_semana = str(dia_semana).strip().lower()
         if "sábado" in dia_semana or "sabado" in dia_semana or "domingo" in dia_semana:
             return 0  
@@ -100,6 +101,7 @@ class HorasCalculator:
         
         horas_esperadas = HorasCalculator._obtener_horas_esperadas(dia_semana)
         
+        # RESCATE DE PERMISOS EXTERNOS
         minutos_permiso_externo = 0
         if fecha_completa_str:
             try:
@@ -162,30 +164,32 @@ class HorasCalculator:
         return minutos_permiso_externo, minutos_permiso_externo, None
     
     @staticmethod
-    def _es_semana_parcial(df_semana, numero_semana, df_empleado_completo):
-        dias_en_semana = df_semana['DiaPalabra'].astype(str).str.lower().tolist() if 'DiaPalabra' in df_semana.columns else []
-        numeros_dias = sorted(df_semana['Número'].tolist())
+    def _calcular_meta_semana(df_semana):
+        """
+        ✅ LÓGICA ROBUSTA: Calcula la meta sumando horas esperadas de TODOS los días laborables que existen
         
-        if not numeros_dias:
-            return False, 5, 44 * 60
+        Funciona para:
+        - Semana que empieza jueves (9+8 = 17h)
+        - Semana que empieza lunes y termina miércoles (9+9+9 = 27h)
+        - Semana completa lunes-viernes (9+9+9+9+8 = 44h)
+        - Cualquier combinación de días laborables
+        """
+        meta_minutos = 0
         
-        es_primera_semana = len(dias_en_semana) == 0 or 'lunes' not in dias_en_semana[0].lower()
-        es_ultima_semana = len(df_semana[~df_semana['DiaSemana'].astype(str).str.lower().str.contains('sabado|sábado|domingo', na=False)]) < 5 if 'DiaSemana' in df_semana.columns else False
+        # Filtrar SOLO días laborables (no sábado/domingo)
+        df_laborables = df_semana[
+            ~df_semana['DiaSemana'].astype(str).str.lower().str.contains(
+                'sabado|sábado|domingo', na=False
+            )
+        ]
         
-        if es_primera_semana or es_ultima_semana:
-            meta_minutos = 0
-            
-            if 'DiaSemana' in df_semana.columns:
-                df_laborables = df_semana[~df_semana['DiaSemana'].astype(str).str.lower().str.contains('sabado|sábado|domingo', na=False)]
-            else:
-                df_laborables = df_semana
-            
-            for _, row in df_laborables.iterrows():
-                meta_minutos += HorasCalculator._obtener_horas_esperadas(row.get('DiaSemana', ''))
-            
-            return True, len(df_laborables), meta_minutos
+        # Sumar horas esperadas de cada día que existe
+        for _, row in df_laborables.iterrows():
+            meta_minutos += HorasCalculator._obtener_horas_esperadas(row.get('DiaSemana', ''))
         
-        return False, 5, 44 * 60
+        es_parcial = len(df_laborables) < 5
+        
+        return es_parcial, len(df_laborables), meta_minutos
     
     @staticmethod
     def procesar_funcionario(df_empleado, dict_permisos=None):
@@ -202,11 +206,10 @@ class HorasCalculator:
                 continue
             
             df_semana = df_empleado[df_empleado['Semana'] == semana_num].sort_values('Número')
-            es_parcial, dias_esperados, meta_calculada = HorasCalculator._es_semana_parcial(
-                df_semana, semana_num, df_empleado
-            )
             
-            meta_semanal_final = meta_calculada if es_parcial else (44 * 60)
+            # ✅ NUEVA LÓGICA: Usar función robusta
+            es_parcial, dias_laborables, meta_semanal_final = HorasCalculator._calcular_meta_semana(df_semana)
+            
             minutos_semana = 0
             dias_info = []
             acumulado = 0
