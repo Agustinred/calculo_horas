@@ -139,9 +139,9 @@ if uploaded_file_permisos:
                         minutos = 0
             
             if key in df_permisos_dict:
-                df_permisos_dict[key] += minutes
+                df_permisos_dict[key] += minutos
             else:
-                df_permisos_dict[key] = minutes
+                df_permisos_dict[key] = minutos
                 
         st.sidebar.success(f"✅ Se cargaron {len(df_permisos_dict)} registros de permisos basados en 'FechaInicio'.")
     except Exception as e:
