@@ -1,6 +1,7 @@
 """
 modules/calculator.py
 Calculador de asistencia optimizado con soporte para cruce de permisos externos por hora.
+CORREGIDO: _es_semana_parcial() solo suma días laborables (lunes a viernes)
 """
 
 import pandas as pd
@@ -199,7 +200,14 @@ class HorasCalculator:
     
     @staticmethod
     def _es_semana_parcial(df_semana, numero_semana, df_empleado_completo):
-        """Detecta si una semana es parcial (inicio o fin de mes)"""
+        """
+        ✅ CORREGIDO: Detecta si una semana es parcial y calcula SOLO horas de días laborables (lunes-viernes)
+        
+        Cambios:
+        - Solo suma horas para días lunes a viernes
+        - Ignora sábado y domingo completamente
+        - Calcula correctamente: jueves=9h, viernes=8h
+        """
         dias_en_semana = df_semana['DiaPalabra'].astype(str).str.lower().tolist()
         numeros_dias = sorted(df_semana['Número'].tolist())
         
@@ -211,9 +219,14 @@ class HorasCalculator:
         
         if es_primera_semana or es_ultima_semana:
             meta_minutos = 0
-            for _, row in df_semana.iterrows():
+            
+            # ✅ FILTRO: Solo iterar sobre días laborables (lunes a viernes)
+            df_laborables = df_semana[~df_semana['DiaPalabra'].astype(str).str.lower().str.contains('sabado|sábado|domingo')]
+            
+            for _, row in df_laborables.iterrows():
                 meta_minutos += HorasCalculator._obtener_horas_esperadas(row['DiaSemana'])
-            return True, len(df_semana), meta_minutos
+            
+            return True, len(df_laborables), meta_minutos
         
         return False, 5, 44 * 60
     
@@ -268,7 +281,8 @@ class HorasCalculator:
                     'minutos': minutos_dia,
                     'acumulado': acumulado,
                     'minutos_externos': minutos_externos,
-                    'observacion': row.get('Observacion', '')
+                    'observacion': row.get('Observacion', ''),
+                    'Fecha': fecha_str
                 })
             
             diferencia_minutos = minutos_semana - meta_semanal_final
