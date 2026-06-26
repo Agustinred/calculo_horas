@@ -275,48 +275,49 @@ if funcionarios_filtrados:
                 
                 # ====================================================================================
                 # 🔬 DETECTOR DE CRUCES DE PERMISOS CON DIAGNÓSTICO
+                # ✅ CORREGIDO: Usa minutos_externos de dias_info (ya calculados en calculator.py)
                 # ====================================================================================
                 horas_permiso_lista = []
                 diagnostico_llaves_intentadas = []
                 diagnostico_estado_cruce = []
 
-                # Mapeo de días para obtener la fecha real
+                # Obtener datos de días desde resultado_funcionario
                 lista_dias_interna = (
                     resultado_funcionario.get('dias_por_semana', {}).get(semana_num, []) or 
                     resultado_funcionario.get('dias_por_semana', {}).get(str(semana_num), [])
                 )
-                mapa_por_dia_mes = {}
-                for dia_datos in lista_dias_interna:
-                    if 'Fecha' in dia_datos and pd.notna(dia_datos['Fecha']):
-                        dt_obj = pd.to_datetime(dia_datos['Fecha'])
-                        mapa_por_dia_mes[dt_obj.day] = dt_obj.strftime('%Y-%m-%d')
+                
+                # Mapeo: número_día → datos_día (para búsqueda rápida)
+                mapa_dias = {int(dia['número']): dia for dia in lista_dias_interna}
 
                 for idx, fila in df_detalle.iterrows():
                     minutos_p = 0
-                    texto_dia_columna = str(fila.get('Día', '')).upper()
-                    match_numero = re.search(r'\d+', texto_dia_columna)
-                    
                     llave_buscada = "N/A"
                     estado_rastreo = "❌ No se pudo determinar fecha"
+                    
+                    texto_dia_columna = str(fila.get('Día', '')).upper()
+                    match_numero = re.search(r'\d+', texto_dia_columna)
                     
                     if match_numero:
                         dia_mes = int(match_numero.group())
                         
-                        # Intentar obtener la fecha real del mapeo
-                        if dia_mes in mapa_por_dia_mes:
-                            fecha_real = mapa_por_dia_mes[dia_mes]
+                        # Buscar datos del día en el mapeo
+                        if dia_mes in mapa_dias:
+                            dia_datos = mapa_dias[dia_mes]
+                            minutos_p = dia_datos.get('minutos_externos', 0)  # ✅ USA minutos_externos ya calculado
+                            fecha_real = dia_datos.get('Fecha', 'N/A')
+                            
                             llave_buscada = f"('{nombre_norm_func}', '{fecha_real}')"
                             
-                            # Buscar en diccionario con nombre normalizado (minúsculas)
-                            if (nombre_norm_func, fecha_real) in df_permisos_dict:
-                                minutos_p = df_permisos_dict[(nombre_norm_func, fecha_real)]
+                            if minutos_p > 0:
                                 horas_p = minutos_p / 60
-                                estado_rastreo = f"✅ MATCH ({minutos_p} min / {horas_p:.1f}h)"
+                                estado_rastreo = f"✅ PERMISO APLICADO ({minutos_p} min / {horas_p:.1f}h)"
                             else:
-                                estado_rastreo = "❌ No encontrado"
+                                estado_rastreo = "✅ Sin permisos para este día"
                         else:
-                            estado_rastreo = f"❌ Día {dia_mes} no en datos"
+                            estado_rastreo = f"❌ Día {dia_mes} no encontrado en datos"
 
+                    # Formatear horas
                     if minutos_p > 0:
                         horas_permiso_lista.append(f"{minutos_p // 60:02d}:{minutos_p % 60:02d}")
                     else:
