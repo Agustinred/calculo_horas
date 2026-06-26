@@ -116,9 +116,27 @@ class HorasCalculator:
         
         horas_esperadas = HorasCalculator._obtener_horas_esperadas(dia_semana)
         
+        # -------------------------------------------------------------------------
+        # 🎯 RESCATE GLOBAL E INDEPENDIENTE DE PERMISOS EXTERNOS POR HORA
+        # -------------------------------------------------------------------------
+        minutos_permiso_externo = 0
+        if fecha_completa_str:
+            try:
+                ts = pd.to_datetime(fecha_completa_str)
+                fmt_ymd = ts.strftime('%Y-%m-%d')
+                fmt_dmy = ts.strftime('%d-%m-%Y')
+                
+                llave_ymd = (nombre_normalizado, fmt_ymd)
+                llave_dmy = (nombre_normalizado, fmt_dmy)
+                
+                minutos_permiso_externo = dict_permisos.get(llave_ymd, dict_permisos.get(llave_dmy, 0))
+            except:
+                llave_cruce = (nombre_normalizado, fecha_completa_str)
+                minutos_permiso_externo = dict_permisos.get(llave_cruce, 0)
+
         # 1. EVALUAR SI HAY UNA COMBINACIÓN COMPLETA PRIMERO
         if ("permiso adm" in obs_lower or "per. adm" in obs_lower) and ("mañana" in obs_lower) and ("lic" in obs_lower) and ("tarde" in obs_lower):
-            return horas_esperadas, 0, None
+            return horas_esperadas + minutos_permiso_externo, minutos_permiso_externo, None
 
         # 2. CALCULAR MARCAS REALES TRABAJADAS
         minutos_reales = 0
@@ -129,33 +147,7 @@ class HorasCalculator:
             salida_min = HorasCalculator._hora_a_minutos(hora_salida)
             minutos_reales = max(0, salida_min - entrada_min)
             
-        # 3. CRUCE ESTRICTO: PERMISO COMPLEMENTARIO POR HORAS (Búsqueda flexible para evitar fallos por puntos o espacios)
-        es_permiso_horas = False
-        if "per" in obs_lower and "compl" in obs_lower and "horas" in obs_lower:
-            es_permiso_horas = True
-        elif "permiso" in obs_lower and "horas" in obs_lower:
-            es_permiso_horas = True
-
-        if es_permiso_horas:
-            minutos_permiso_externo = 0
-            if fecha_completa_str:
-                try:
-                    ts = pd.to_datetime(fecha_completa_str)
-                    fmt_ymd = ts.strftime('%Y-%m-%d')
-                    fmt_dmy = ts.strftime('%d-%m-%Y')
-                    
-                    llave_ymd = (nombre_normalizado, fmt_ymd)
-                    llave_dmy = (nombre_normalizado, fmt_dmy)
-                    
-                    minutos_permiso_externo = dict_permisos.get(llave_ymd, dict_permisos.get(llave_dmy, 0))
-                except:
-                    llave_cruce = (nombre_normalizado, fecha_completa_str)
-                    minutos_permiso_externo = dict_permisos.get(llave_cruce, 0)
-            
-            total_dia = minutos_reales + minutos_permiso_externo
-            return total_dia, minutos_permiso_externo, None
-
-        # 4. EVALUAR JUSTIFICACIÓN PARCIAL (MEDIA JORNADA)
+        # 3. EVALUAR JUSTIFICACIÓN PARCIAL (MEDIA JORNADA)
         just_parcial = HorasCalculator._obtener_justificacion_parcial(observacion)
         if just_parcial in ["mañana", "tarde"]:
             if "viernes" in dia_lower:
@@ -163,33 +155,38 @@ class HorasCalculator:
             else:
                 minutos_bonificados = (4 * 60) + 30  
             
-            return (minutos_bonificados + minutos_reales), 0, None
+            total_dia = minutos_bonificados + minutos_reales + minutos_permiso_externo
+            return total_dia, minutos_permiso_externo, None
 
-        # 5. EVALUAR JUSTIFICACIÓN COMPLETA
+        # 4. EVALUAR JUSTIFICACIÓN COMPLETA
         if HorasCalculator._es_justificacion_completa(observacion):
-            if tiene_marcas and minutos_reales > horas_esperadas:
-                return minutos_reales, 0, None
-            return horas_esperadas, 0, None
+            base = max(minutos_reales, horas_esperadas) if tiene_marcas else horas_esperadas
+            return base + minutos_permiso_externo, minutos_permiso_externo, None
 
-        # 6. CASO NORMAL
+        # 5. CASO NORMAL (TIENE MARCAS)
         if tiene_marcas:
-            return minutos_reales, 0, None
+            total_dia = minutos_reales + minutos_permiso_externo
+            return total_dia, minutos_permiso_externo, None
         
-        # 7. MANEJO DE FALTAS DE MARCACIÓN
+        # 6. MANEJO DE FALTAS DE MARCACIÓN
         if hora_entrada == "" or hora_salida == "":
             if "no hábil" in obs_lower or "no habil" in obs_lower or "sabado" in dia_lower or "sábado" in dia_lower or "domingo" in dia_lower:
-                return 0, 0, None
+                return minutos_permiso_externo, minutos_permiso_externo, None
             
             if hora_entrada == "" and hora_salida != "":
                 alerta = f"{nombre_display} - Día {numero_dia} ({dia_semana}): Falta HoraEntrada"
             elif hora_entrada != "" and hora_salida == "":
                 alerta = f"{nombre_display} - Día {numero_dia} ({dia_semana}): Falta HoraSalida"
             elif hora_entrada == "" and hora_salida == "":
+                # Si no registra marcas reales pero sí posee horas cargadas desde fuera, 
+                # se le reconocen los minutos externos sin levantar alerta crítica de falta absoluta
+                if minutos_permiso_externo > 0:
+                    return minutos_permiso_externo, minutos_permiso_externo, None
                 alerta = f"{nombre_display} - Día {numero_dia} ({dia_semana}): Falta Marcación Completa (Entrada y Salida)"
                 
-            return 0, 0, alerta
+            return minutos_permiso_externo, minutos_permiso_externo, alerta
         
-        return 0, 0, None
+        return minutos_permiso_externo, minutos_permiso_externo, None
     
     @staticmethod
     def _es_semana_parcial(df_semana, numero_semana, df_empleado_completo):
@@ -244,12 +241,11 @@ class HorasCalculator:
                     except:
                         fecha_str = str(row['Fecha']).split()[0]
                 
-                # Modificado para recibir minutos_externos retornados explícitamente
                 minutos_dia, minutos_externos, alerta = HorasCalculator.calcular_horas_dia(
                     row, fecha_completa_str=fecha_str, dict_permisos=dict_permisos
                 )
                 
-                minutos_semana += minutos_dia
+                minutos_semana += minutes_dia if 'minutes_dia' in locals() else minutos_dia
                 acumulado += minutos_dia
                 
                 if alerta:
