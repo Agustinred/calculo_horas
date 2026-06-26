@@ -14,21 +14,14 @@ st.set_page_config(
     layout="wide"
 )
 
-# 🔄 FUNCIÓN DE NORMALIZACIÓN ULTRA ESTRICTA (Nombres, Mayúsculas, Tildes, Espacios, Puntos)
+# 🔄 FUNCIÓN DE NORMALIZACIÓN
 def normalizar_texto_local(texto):
     if not texto or pd.isna(texto):
         return ""
     
-    # 1. Convertir a string y pasar a mayúsculas
     texto = str(texto).upper()
-    
-    # 2. Remover tildes, diéresis y acentos complejos
     texto = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
-    
-    # 3. Remover puntos, comas, guiones y cualquier carácter que no sea letra o espacio
     texto = re.sub(r'[^A-Z\s]', ' ', texto)
-    
-    # 4. Colapsar múltiples espacios o espacios dobles en uno solo y limpiar extremos
     texto = re.sub(r'\s+', ' ', texto).strip()
     
     return texto
@@ -61,7 +54,7 @@ archivos_subidos = st.sidebar.file_uploader(
     key="uploader_asistencia"
 )
 
-# Nuevo Cargador Opcional para la Base de Permisos
+# Cargador Opcional para la Base de Permisos
 uploaded_file_permisos = st.sidebar.file_uploader(
     "Selecciona archivo de Permisos (Opcional)",
     type=['xlsx', 'xls'],
@@ -78,248 +71,128 @@ if not archivos_subidos:
     """)
     st.stop()
 
-# Procesamiento de la Base de Permisos Externa
+# =========================================================================
+# 🎯 PROCESAMIENTO DE LA BASE DE PERMISOS EXTERNA (SIMPLIFICADO)
+# =========================================================================
 df_permisos_dict = {}
 debug_df_permisos = pd.DataFrame()
 
 if uploaded_file_permisos:
     try:
-        df_p = pd.read_excel(uploaded_file_permisos)
+        df_permisos_dict, debug_df_permisos = DataLoader.construir_dict_permisos(uploaded_file_permisos)
         
-        # Sanitizar columnas de nombres separados eliminando espacios extras
-        df_p['Nombres'] = df_p['Nombres'].fillna('').astype(str).str.strip()
-        df_p['ApellidoPaterno'] = df_p['ApellidoPaterno'].fillna('').astype(str).str.strip()
-        df_p['ApellidoMaterno'] = df_p['ApellidoMaterno'].fillna('').astype(str).str.strip()
-        
-        # 🧩 CONCATENACIÓN: Nombres + ApellidoPaterno + ApellidoMaterno
-        df_p['Nombre_Completo_Raw'] = (
-            df_p['Nombres'] + " " + 
-            df_p['ApellidoPaterno'] + " " + 
-            df_p['ApellidoMaterno']
-        )
-        
-        # Aplicar la nueva normalización estricta sobre el nombre armado
-        df_p['Nombre_Normalizado'] = df_p['Nombre_Completo_Raw'].apply(normalizar_texto_local)
-        
-        # Forzar la lectura estricta y remover zonas horarias para evitar desfases de días
-        if 'FechaInicio' in df_p.columns:
-            fechas_transformadas = pd.to_datetime(df_p['FechaInicio'], errors='coerce')
-            if fechas_transformadas.dt.tz is not None:
-                fechas_transformadas = fechas_transformadas.dt.tz_convert(None)
-            df_p['Fecha_Str'] = fechas_transformadas.dt.strftime('%Y-%m-%d')
+        if df_permisos_dict:
+            st.sidebar.success(f"✅ Se cargaron {len(df_permisos_dict)} registros de permisos")
         else:
-            st.sidebar.error("⚠️ No se encontró la columna 'FechaInicio' en el archivo de permisos.")
-            df_p['Fecha_Str'] = None
-        
-        # Guardar copia para la tabla de diagnóstico inferior
-        debug_df_permisos = df_p.copy()
-        
-        # Poblar diccionario optimizado de mapeo guardando tuplas reales de Python
-        for _, row in df_p.iterrows():
-            if pd.isna(row['Fecha_Str']) or not row['Nombre_Normalizado']:
-                continue
-                
-            nombre_llave = str(row['Nombre_Normalizado']).strip()
-            fecha_llave = str(row['Fecha_Str']).strip()
-            key = (nombre_llave, fecha_llave)
-            
-            cantidad_raw = row['QuantityInHours'] if 'QuantityInHours' in df_p.columns else row.get('CantidadEnHora', 0)
-            minutos = 0
-            
-            if pd.notna(cantidad_raw):
-                cantidad_str = str(cantidad_raw).strip()
-                partes = cantidad_str.split(':')
-                
-                if len(partes) >= 2:
-                    try:
-                        minutos = int(partes[0]) * 60 + int(partes[1])
-                    except ValueError:
-                        minutos = 0
-                else:
-                    try:
-                        minutos = int(float(cantidad_str) * 60)
-                    except ValueError:
-                        minutos = 0
-            
-            if key in df_permisos_dict:
-                df_permisos_dict[key] += minutos
-            else:
-                df_permisos_dict[key] = minutos
-                
-        st.sidebar.success(f"✅ Se cargaron {len(df_permisos_dict)} registros de permisos basados en 'FechaInicio'.")
+            st.sidebar.warning("⚠️ No se pudieron procesar permisos. Verifica el formato del archivo.")
     except Exception as e:
-        st.sidebar.error(f"⚠️ Nota sobre permisos: No se pudo procesar el archivo opcional ({e})")
+        st.sidebar.error(f"⚠️ Error al procesar permisos: {str(e)}")
 
 # =========================================================================
-# 🔍 PANEL DE DIAGNÓSTICO EN TIEMPO REAL (INTEGRADO EN INTERFAZ WEB)
+# 🔍 PANEL DE DIAGNÓSTICO EN TIEMPO REAL
 # =========================================================================
 st.subheader("⚙️ Herramienta de Inspección de Cruces en Memoria")
 with st.expander("🔍 Analizar Diccionario Global de Permisos Externos", expanded=False):
     if df_permisos_dict:
-        st.write(f"📊 **Total de registros llave construidos en memoria:** {len(df_permisos_dict)}")
+        st.write(f"📊 **Total de registros clave construidos en memoria:** {len(df_permisos_dict)}")
         
-        # Formulario interactivo rápido para auditar si una tupla matemática exacta existe
+        # Formulario interactivo para auditar tuplas
         st.write("🧪 **Simulador de Búsqueda Manual de Coincidencias:**")
         col_d1, col_d2 = st.columns(2)
         with col_d1:
-            nombre_prueba = st.text_input("Nombre a evaluar (Normalizado):", placeholder="EJ: CLAUDIA ALEJANDRA ABARCA MANRIQUEZ", key="diag_nom_input")
+            nombre_prueba = st.text_input(
+                "Nombre a evaluar (Normalizado):", 
+                placeholder="EJ: claudia alejandra abarca manriquez", 
+                key="diag_nom_input"
+            )
         with col_d2:
-            fecha_prueba = st.text_input("Fecha a evaluar (AAAA-MM-DD):", placeholder="EJ: 2026-01-09", key="diag_fec_input")
+            fecha_prueba = st.text_input(
+                "Fecha a evaluar (AAAA-MM-DD):", 
+                placeholder="EJ: 2026-01-09", 
+                key="diag_fec_input"
+            )
             
         if nombre_prueba and fecha_prueba:
-            llave_prueba = (nombre_prueba.strip().upper(), fecha_prueba.strip())
+            llave_prueba = (nombre_prueba.strip().lower(), fecha_prueba.strip())
             st.markdown("---")
-            st.write(f"🔎 *Buscando tupla matemática:* `{llave_prueba}`")
+            st.write(f"🔎 *Buscando tupla:* `{llave_prueba}`")
             if llave_prueba in df_permisos_dict:
-                st.success(f"✅ ¡COINCIDENCIA ENCONTRADA EN DICCIONARIO! Valor: {df_permisos_dict[llave_prueba]} minutos.")
+                minutos = df_permisos_dict[llave_prueba]
+                horas = minutos / 60
+                st.success(f"✅ ¡COINCIDENCIA ENCONTRADA! Valor: {minutos} minutos ({horas:.1f}h)")
             else:
-                st.error("❌ La llave no existe tal cual en el diccionario. Revisa espacios o formatos de fecha.")
+                st.error("❌ La llave no existe en el diccionario.")
         
-        st.write("📋 **Vista previa en formato JSON de las primeras 20 llaves en memoria:**")
-        muestra_dict = {f"{k[0]} | {k[1]}": f"{v} mins" for k, v in list(df_permisos_dict.items())[:20]}
+        st.write("📋 **Vista previa JSON de las primeras 20 llaves:**")
+        muestra_dict = {f"{k[0]} | {k[1]}": f"{v} mins ({v/60:.1f}h)" for k, v in list(df_permisos_dict.items())[:20]}
         st.json(muestra_dict)
     else:
-        st.info("💡 No hay datos en el diccionario de permisos. Carga un archivo de permisos en la barra lateral para poblar el inspector.")
-st.markdown("---")
-# =========================================================================
+        st.info("💡 No hay datos en el diccionario de permisos. Carga un archivo de permisos para poblar el inspector.")
 
-# Procesar archivo principal de asistencia
+st.markdown("---")
+
+# =========================================================================
+# 🔄 PROCESAMIENTO DE ARCHIVOS PRINCIPALES
+# =========================================================================
 archivo = archivos_subidos
 
-with st.spinner("Procesando archivo..."):
-    df_h1, df_h2, fecha_mes, errores = DataLoader.cargar_excel(archivo)
-    
-    if errores:
-        for error in errores:
-            st.error(error)
-        st.stop()
-    
-    # 🛠️ SANITIZACIÓN DE DATOS ANTES DE PASAR A LA CALCULADORA 🛠️
-    if 'DiaPalabra' in df_h1.columns:
-        df_h1['DiaSemana'] = df_h1['DiaPalabra'].astype(str)
-    else:
-        columnas_lower = {c.lower(): c for c in df_h1.columns}
-        if 'diapalabra' in columnas_lower:
-            df_h1['DiaSemana'] = df_h1[columnas_lower['diapalabra']].astype(str)
-            
-    if 'Observacion' in df_h1.columns:
-        df_h1['Observacion'] = df_h1['Observacion'].fillna('').astype(str).str.strip()
-        
-    # Buscar dinámicamente la columna Nombre en la asistencia
-    col_nombre_asist = [c for c in df_h1.columns if 'nombre' in str(c).lower()]
-    if col_nombre_asist:
-        df_h1['Nombre_Normalizado'] = df_h1[col_nombre_asist[0]].apply(normalizar_texto_local)
-    else:
-        df_h1['Nombre_Normalizado'] = df_h1['Nombre'].apply(normalizar_texto_local)
-        
-    col_cat_nombre = 'NOMBRE' if 'NOMBRE' in df_h2.columns else 'Nombre'
-    if col_cat_nombre in df_h2.columns:
-        df_h2['Nombre_Normalizado'] = df_h2[col_cat_nombre].apply(normalizar_texto_local)
+# Cargar datos
+df_hoja1, df_hoja2, fecha_mes, errores = DataLoader.cargar_excel(archivo)
 
-    # 🔄 CONTROL DE EXCEPCIONES Y LLAMADA COMPATIBLE CON LA CALCULADORA 🔄
-    try:
-        resultados, alertas = HorasCalculator.procesar_todos(df_h1, df_h2, dict_permisos=df_permisos_dict)
-    except TypeError:
-        resultados, alertas = HorasCalculator.procesar_todos(df_h1, df_h2)
-        if df_permisos_dict:
-            st.warning("⚠️ El archivo de permisos se cargó, pero `modules/calculator.py` aún no está modificado para procesarlo.")
+if errores:
+    for error in errores:
+        st.error(error)
+    st.stop()
 
-st.success("✅ Archivo cargado correctamente")
+# Procesar todos los funcionarios
+resultados, alertas = HorasCalculator.procesar_todos(df_hoja1, df_hoja2, dict_permisos=df_permisos_dict)
 
-if fecha_mes:
-    st.subheader(f"📅 Período: {fecha_mes.strftime('%B de %Y')}")
+# Crear resumen
+df_resumen = Formatter.crear_resumen(resultados)
 
-# Alertas
-if alertas:
-    st.subheader(f"⚠️ Alertas de Marcación ({len(alertas)} encontradas)")
-    with st.expander("Ver alertas", expanded=len(alertas) <= 5):
-        for alerta in alertas:
-            st.warning(alerta)
+st.subheader("📊 Resumen General")
+st.dataframe(df_resumen, use_container_width=True, hide_index=True)
 
-# FILTROS
-st.subheader("🔍 Filtros")
+# =========================================================================
+# 📋 VISTA DETALLADA POR FUNCIONARIO
+# =========================================================================
+st.subheader("👤 Detalles por Funcionario")
 
-gerencias_unicas = sorted(set([r['gerencia'] for r in resultados.values() if r.get('gerencia')]))
-juridicas_unicas = sorted(set([r['c_juridica'] for r in resultados.values() if r.get('c_juridica') and r.get('c_juridica') != 'N/A']))
-nombres_unicos = sorted(set([r['nombre'] for r in resultados.values()]))
-
-col1, col2, col3 = st.columns(3)
+# Selector de filtro
+col1, col2 = st.columns([2, 1])
 
 with col1:
     filtro_gerencia = st.multiselect(
-        "Gerencia",
-        options=gerencias_unicas,
-        default=gerencias_unicas,
+        "Filtrar por Gerencia:",
+        options=sorted(df_resumen['Gerencia'].unique()),
         key="filtro_gerencia"
     )
 
 with col2:
-    filtro_juridica = st.multiselect(
-        "Calidad Jurídica",
-        options=juridicas_unicas,
-        default=juridicas_unicas,
-        key="filtro_juridica"
+    orden = st.radio(
+        "Ordenar por:",
+        options=["Nombre", "Diferencia Mes"],
+        horizontal=True,
+        key="orden_selector"
     )
 
-with col3:
-    filtro_nombre = st.multiselect(
-        "Nombre",
-        options=nombres_unicos,
-        default=nombres_unicos,
-        key="filtro_nombre"
-    )
+# Aplicar filtros
+if filtro_gerencia:
+    df_filtrado = df_resumen[df_resumen['Gerencia'].isin(filtro_gerencia)]
+else:
+    df_filtrado = df_resumen
 
-# TABLA DE RESUMEN
-st.subheader("📊 Resumen de Cumplimiento Horario")
+# Ordenar
+if orden == "Diferencia Mes":
+    df_filtrado = df_filtrado.sort_values('Diferencia Mes')
+else:
+    df_filtrado = df_filtrado.sort_values('Nombre')
 
-df_resumen = Formatter.crear_df_resumen(
-    resultados,
-    filtro_gerencia=filtro_gerencia if filtro_gerencia else None,
-    filtro_juridica=filtro_juridica if filtro_juridica else None
-)
+funcionarios_filtrados = df_filtrado['Nombre'].unique().tolist()
 
-if filtro_nombre:
-    df_resumen = df_resumen[df_resumen['Nombre'].isin(filtro_nombre)]
-
-if len(df_resumen) == 0:
-    st.warning("⚠️ No hay datos con los filtros seleccionados")
-    st.stop()
-
-st.dataframe(df_resumen, use_container_width=True, height=400)
-
-# ESTADÍSTICAS
-st.subheader("📈 Estadísticas")
-
-col1, col2, col3, col4 = st.columns(4)
-
-total_empleados = len(df_resumen)
-empleados_completos = len([r for r in resultados.values() 
-                          if r['nombre'] in df_resumen['Nombre'].values 
-                          and r['total_minutos_mes'] >= 0])
-empleados_incompletos = total_empleados - empleados_completos
-total_minutos_faltantes = sum([r['total_minutos_mes'] for r in resultados.values() 
-                              if r['nombre'] in df_resumen['Nombre'].values
-                              and r['total_minutos_mes'] < 0])
-
-with col1:
-    st.metric("Total Empleados", total_empleados)
-with col2:
-    st.metric("Cumplimiento", f"{empleados_completos}/{total_empleados}")
-with col3:
-    st.metric("Incompletos", empleados_incompletos)
-with col4:
-    horas_faltantes = abs(total_minutos_faltantes) // 60
-    mins_faltantes = abs(total_minutos_faltantes) % 60
-    st.metric("Faltantes Total", f"{horas_faltantes}:{mins_faltantes:02d}")
-
-# VISTA DETALLADA POR FUNCIONARIO
-st.subheader("👤 Detalles por Funcionario")
-
-funcionarios_filtrados = df_resumen['Nombre'].tolist()
-
-if len(funcionarios_filtrados) > 0:
+if funcionarios_filtrados:
     funcionario_seleccionado = st.selectbox(
-        "Selecciona funcionario para ver detalles",
+        "Selecciona un funcionario:",
         options=funcionarios_filtrados,
         key="funcionario_selector"
     )
@@ -332,7 +205,7 @@ if len(funcionarios_filtrados) > 0:
                 break
         
         if resultado_funcionario:
-            nombre_norm_func = normalizar_texto_local(resultado_funcionario['nombre'])
+            nombre_norm_func = DataLoader.normalizar_texto(resultado_funcionario['nombre'])
             
             col1, col2, col3 = st.columns(3)
             
@@ -400,8 +273,8 @@ if len(funcionarios_filtrados) > 0:
                 
                 df_detalle = Formatter.crear_df_detalle_semana(semana_info['días'])
                 
-               # ====================================================================================
-                # 🔬 DETECTOR DE ERRORES REPARADO (CONSTRUCCIÓN DE LLAVE CON FECHA REAL)
+                # ====================================================================================
+                # 🔬 DETECTOR DE CRUCES DE PERMISOS CON DIAGNÓSTICO
                 # ====================================================================================
                 horas_permiso_lista = []
                 diagnostico_llaves_intentadas = []
@@ -416,7 +289,7 @@ if len(funcionarios_filtrados) > 0:
                 for dia_datos in lista_dias_interna:
                     if 'Fecha' in dia_datos and pd.notna(dia_datos['Fecha']):
                         dt_obj = pd.to_datetime(dia_datos['Fecha'])
-                        mapa_por_dia_mes[dt_obj.day] = dt_obj.strftime('%Y-%m-%d') # Guardamos fecha formato ISO
+                        mapa_por_dia_mes[dt_obj.day] = dt_obj.strftime('%Y-%m-%d')
 
                 for idx, fila in df_detalle.iterrows():
                     minutos_p = 0
@@ -434,13 +307,15 @@ if len(funcionarios_filtrados) > 0:
                             fecha_real = mapa_por_dia_mes[dia_mes]
                             llave_buscada = f"('{nombre_norm_func}', '{fecha_real}')"
                             
+                            # Buscar en diccionario con nombre normalizado (minúsculas)
                             if (nombre_norm_func, fecha_real) in df_permisos_dict:
                                 minutos_p = df_permisos_dict[(nombre_norm_func, fecha_real)]
-                                estado_rastreo = f"✅ MATCH PERFECTO ({minutos_p} min)"
+                                horas_p = minutos_p / 60
+                                estado_rastreo = f"✅ MATCH ({minutos_p} min / {horas_p:.1f}h)"
                             else:
-                                estado_rastreo = "❌ Llave no existe en diccionario"
+                                estado_rastreo = "❌ No encontrado"
                         else:
-                            estado_rastreo = f"❌ Día {dia_mes} no encontrado en datos de semana"
+                            estado_rastreo = f"❌ Día {dia_mes} no en datos"
 
                     if minutos_p > 0:
                         horas_permiso_lista.append(f"{minutos_p // 60:02d}:{minutos_p % 60:02d}")
@@ -451,7 +326,7 @@ if len(funcionarios_filtrados) > 0:
                     diagnostico_estado_cruce.append(estado_rastreo)
 
                 df_detalle['Permiso Externo (Horas)'] = horas_permiso_lista
-                df_detalle['🔬 Llave que Buscó'] = diagnostico_llaves_intentadas
+                df_detalle['🔬 Llave Buscada'] = diagnostico_llaves_intentadas
                 df_detalle['⚙️ Resultado del Cruce'] = diagnostico_estado_cruce
 
                 st.dataframe(df_detalle, use_container_width=True, hide_index=True)
@@ -493,14 +368,24 @@ with col3:
         use_container_width=True
     )
 
-# Panel estático inferior de apoyo
+# Panel de diagnóstico secundario
 st.markdown("---")
 st.subheader("🛠️ Panel de Diagnóstico Secundario")
 with st.expander("🔎 Ver detalles secundarios del funcionario seleccionado"):
-    nombre_a_diagnosticar = normalizar_texto_local(funcionario_seleccionado) if funcionarios_filtrados else ""
-    if nombre_a_diagnosticar:
-        st.write(f"### Análisis enfocado en: `{nombre_a_diagnosticar}`")
-        if not debug_df_permisos.empty:
-            df_perm_filtrado = debug_df_permisos[debug_df_permisos['Nombre_Normalizado'] == nombre_a_diagnosticar]
-            if not df_perm_filtrado.empty:
-                st.dataframe(df_perm_filtrado[['Nombre_Completo_Raw', 'Nombre_Normalizado', 'Fecha_Str', 'CantidadEnHora']])
+    if 'funcionario_seleccionado' in locals() and funcionario_seleccionado:
+        nombre_a_diagnosticar = DataLoader.normalizar_texto(funcionario_seleccionado)
+        if nombre_a_diagnosticar:
+            st.write(f"### Análisis enfocado en: `{nombre_a_diagnosticar}`")
+            if not debug_df_permisos.empty:
+                df_perm_filtrado = debug_df_permisos[
+                    debug_df_permisos['Nombre_Normalizado'] == nombre_a_diagnosticar
+                ]
+                if not df_perm_filtrado.empty:
+                    st.dataframe(df_perm_filtrado[[
+                        'Nombres', 'ApellidoPaterno', 'ApellidoMaterno',
+                        'Nombre_Normalizado', 'FechaInicio', 'CantidadEnHora'
+                    ]], use_container_width=True, hide_index=True)
+                else:
+                    st.info("No hay registros de permisos para este funcionario")
+            else:
+                st.info("No hay datos de permisos cargados")
