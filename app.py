@@ -364,36 +364,51 @@ if len(funcionarios_filtrados) > 0:
                 
                 df_detalle = Formatter.crear_df_detalle_semana(semana_info['días'])
                 
-                # =====================================================================
-                # 🔄 CRUCE EXACTO E INYECCIÓN DE PERMISOS (RESPETANDO EL MES EN CURSO)
+# =====================================================================
+                # 🔄 CRUCE EXACTO E INYECCIÓN DE PERMISOS (CORREGIDO SIN DESFASES)
                 # =====================================================================
                 horas_permiso_lista = []
                 
-                # Mapeamos los datos diarios fidedignos desde la lista interna procesada por la calculadora
-                lista_dias_interna = resultado_funcionario['dias_por_semana'][semana_num]
+                # Crear un mapa rápido de Fecha -> Observación/Datos desde el motor de cálculo
+                mapa_fechas_calculadas = {}
+                lista_dias_interna = resultado_funcionario.get('dias_por_semana', {}).get(semana_num, [])
                 
                 for dia_datos in lista_dias_interna:
+                    if 'Fecha' in dia_datos and pd.notna(dia_datos['Fecha']):
+                        f_str = pd.to_datetime(dia_datos['Fecha']).strftime('%Y-%m-%d')
+                        mapa_fechas_calculadas[f_str] = dia_datos
+
+                # Construimos la lista de permisos alineada PERFECTAMENTE con las filas de df_detalle
+                # Asumimos que df_detalle tiene una columna 'Día' (ej: "LUNES 5", "MARTES 6") o una columna 'Fecha'
+                # Para máxima seguridad, usamos el correlativo de la lista interna que armó el DataFrame original
+                for idx, fila in df_detalle.iterrows():
                     minutos_p = 0
-                    obs_dia = str(dia_datos.get('observacion', '')).strip().lower()
                     
-                    # Ejecutar cruce de permiso únicamente si la observación del día lo indica
-                    if "per. comple. (horas)" in obs_dia or "per. comple (horas)" in obs_dia:
-                        # Recuperar fecha exacta calculada por el motor
+                    # Intentamos recuperar los datos del día correspondientes a esta posición de fila
+                    if idx < len(lista_dias_interna):
+                        dia_datos = lista_dias_interna[idx]
+                        obs_dia = str(dia_datos.get('observacion', '')).strip().lower()
+                        
+                        # Independiente de la observación o si ya existe, buscamos si tiene un permiso asignado en la base externa
                         if 'Fecha' in dia_datos and pd.notna(dia_datos['Fecha']):
                             fecha_exacta_str = pd.to_datetime(dia_datos['Fecha']).strftime('%Y-%m-%d')
                             llave_exacta = (nombre_norm_func, fecha_exacta_str)
+                            
+                            # Si deseas que SIEMPRE muestre las horas cuando exista el permiso (incluso si tiene la observación)
                             minutos_p = df_permisos_dict.get(llave_exacta, 0)
                     
                     if minutos_p > 0:
-                        horas_permiso_lista.append(f"⏱| {minutos_p // 60:02d}:{minutos_p % 60:02d}")
+                        horas_permiso_lista.append(f"{minutos_p // 60:02d}:{minutos_p % 60:02d}")
                     else:
                         horas_permiso_lista.append("00:00")
                 
                 # Inyección limpia en el DataFrame visual
                 columnas = list(df_detalle.columns)
-                if 'Observación' in columnas:
-                    idx = columnas.index('Observación')
-                    df_detalle.insert(idx, 'Permiso Externo (Horas)', horas_permiso_lista)
+                if 'Permiso Externo (Horas)' in columnas:
+                    df_detalle['Permiso Externo (Horas)'] = horas_permiso_lista
+                elif 'Observación' in columnas:
+                    idx_obs = columnas.index('Observación')
+                    df_detalle.insert(idx_obs, 'Permiso Externo (Horas)', horas_permiso_lista)
                 else:
                     df_detalle['Permiso Externo (Horas)'] = horas_permiso_lista
                 
