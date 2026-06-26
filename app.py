@@ -114,12 +114,15 @@ if uploaded_file_permisos:
         # Guardar copia para la tabla de diagnóstico inferior
         debug_df_permisos = df_p.copy()
         
-        # Poblar diccionario optimizado de mapeo guardando fechas exactas reales
+        # Poblar diccionario optimizado de mapeo guardando tuplas reales de Python (Independientes)
         for _, row in df_p.iterrows():
             if pd.isna(row['Fecha_Str']) or not row['Nombre_Normalizado']:
                 continue
                 
-            key = (row['Nombre_Normalizado'], row['Fecha_Str'])
+            nombre_llave = str(row['Nombre_Normalizado']).strip()
+            fecha_llave = str(row['Fecha_Str']).strip()
+            key = (nombre_llave, fecha_llave)
+            
             cantidad_raw = row['CantidadEnHora']
             minutos = 0
             
@@ -173,7 +176,8 @@ with st.expander("🔍 Analizar Diccionario Global de Permisos Externos", expand
                 st.error("❌ La llave no existe tal cual en el diccionario. Revisa espacios o formatos de fecha.")
         
         st.write("📋 **Vista previa en formato JSON de las primeras 20 llaves en memoria:**")
-        muestra_dict = {str(k): f"{v} mins" for k, v in list(df_permisos_dict.items())[:20]}
+        # El st.json ahora interpretará correctamente los elementos ya que son tuplas reales nativas
+        muestra_dict = {f"{k[0]} | {k[1]}": f"{v} mins" for k, v in list(df_permisos_dict.items())[:20]}
         st.json(muestra_dict)
     else:
         st.info("💡 No hay datos en el diccionario de permisos. Carga un archivo de permisos en la barra lateral para poblar el inspector.")
@@ -372,7 +376,7 @@ if len(funcionarios_filtrados) > 0:
                 )
                 semanas_a_mostrar = [semana_seleccionada]
             else:
-                semanas_a_mostrar = semanas_disponibles
+                semanas_a_mostrar = weeks_avail = semanas_disponibles
             
             for semana_num in semanas_a_mostrar:
                 semana_info = resultado_funcionario['semanas'][semana_num]
@@ -416,7 +420,7 @@ if len(funcionarios_filtrados) > 0:
                         except:
                             continue
 
-                # Recorremos cada fila que estás viendo en pantalla
+                # Recorremos cada fila visual del dataframe de Streamlit
                 for idx, fila in df_detalle.iterrows():
                     minutos_p = 0
                     texto_dia_columna = str(fila.get('Día', '')).upper()
@@ -435,7 +439,7 @@ if len(funcionarios_filtrados) > 0:
                                 f_str = pd.to_datetime(dia_datos['Fecha']).strftime('%Y-%m-%d')
                                 llave_evaluada = f"('{nombre_norm_func}', '{f_str}')"
                                 
-                                # Intentamos buscar en el diccionario real
+                                # Intentamos buscar usando la tupla corregida
                                 llave_tupla = (nombre_norm_func, f_str)
                                 if llave_tupla in df_permisos_dict:
                                     minutos_p = df_permisos_dict[llave_tupla]
@@ -443,7 +447,7 @@ if len(funcionarios_filtrados) > 0:
                                 else:
                                     estado_rastreo = "❌ Llave no existe en diccionario"
                         else:
-                            # Estrategia de respaldo por mes activo
+                            # Estrategia de respaldo por mes activo si no se encuentra en el mapa directo
                             if fecha_mes:
                                 f_reconstructed = f"{fecha_mes.year}-{fecha_mes.month:02d}-{dia_mes_visual:02d}"
                                 llave_evaluada = f"('{nombre_norm_func}', '{f_reconstructed}') (Reconstruida)"
@@ -462,7 +466,7 @@ if len(funcionarios_filtrados) > 0:
                     diagnostico_llaves_intentadas.append(llave_evaluada)
                     diagnostico_estado_cruce.append(estado_rastreo)
 
-                # Inyectamos las columnas de diagnóstico a la vista para ver el comportamiento
+                # Inyectamos las columnas de diagnóstico a la vista
                 df_detalle['Permiso Externo (Horas)'] = horas_permiso_lista
                 df_detalle['🔬 Llave que Buscó'] = diagnostico_llaves_intentadas
                 df_detalle['⚙️ Resultado del Cruce'] = diagnostico_estado_cruce
