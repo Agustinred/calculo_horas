@@ -141,7 +141,7 @@ if uploaded_file_permisos:
             if key in df_permisos_dict:
                 df_permisos_dict[key] += minutos
             else:
-                df_permisos_dict[key] = minutos
+                df_permisos_dict[key] = minutes
                 
         st.sidebar.success(f"✅ Se cargaron {len(df_permisos_dict)} registros de permisos basados en 'FechaInicio'.")
     except Exception as e:
@@ -398,44 +398,59 @@ if len(funcionarios_filtrados) > 0:
                 df_detalle = Formatter.crear_df_detalle_semana(semana_info['días'])
                 
 # ====================================================================================
-                # 🔄 CRUCE EXACTO BASADO EN EL NÚMERO DE DÍA EXTRAÍDO (SOLUCIÓN AL DESFASE)
+                # 🔄 MOTOR DE CRUCE DINÁMICO ULTRA REFORZADO (ANTI-DESFASES Y TIPOS)
 # ====================================================================================
                 horas_permiso_lista = []
                 lista_dias_interna = resultado_funcionario.get('dias_por_semana', {}).get(semana_num, [])
                 
-                # Mapeamos los días del motor de cálculo usando el día del mes extraído de su objeto de fecha real
-                mapa_dias_mes_calculados = {}
+                # Mapeamos los datos de cálculo usando múltiples llaves redundantes
+                mapa_por_dia_mes = {}
+                mapa_por_fecha_str = {}
+                
                 for dia_datos in lista_dias_interna:
                     if 'Fecha' in dia_datos and pd.notna(dia_datos['Fecha']):
-                        num_dia_mes = pd.to_datetime(dia_datos['Fecha']).day
-                        mapa_dias_mes_calculados[num_dia_mes] = dia_datos
+                        try:
+                            dt_obj = pd.to_datetime(dia_datos['Fecha'])
+                            num_dia = dt_obj.day
+                            str_fecha = dt_obj.strftime('%Y-%m-%d')
+                            
+                            mapa_por_dia_mes[num_dia] = dia_datos
+                            mapa_por_fecha_str[str_fecha] = dia_datos
+                        except Exception:
+                            continue
 
-                # Iteramos el DataFrame visual (df_detalle) resolviendo el número de día de su columna 'Día'
+                # Recorremos cada fila visual del DataFrame de Streamlit
                 for idx, fila in df_detalle.iterrows():
                     minutos_p = 0
-                    texto_dia_columna = str(fila.get('Día', ''))
+                    texto_dia_columna = str(fila.get('Día', '')).upper()
                     
-                    # Extraer el número (por ejemplo, desde "LUNES 5" o "VIERNES 9" extrae el 5 o el 9)
+                    # Intentar extraer el número de día (Ej: "VIERNES 9" -> 9)
                     match_numero = re.search(r'\d+', texto_dia_columna)
                     
                     if match_numero:
                         dia_mes_visual = int(match_numero.group())
                         
-                        # Si ese número de día existe en los cálculos de esta semana, cruzamos con la base externa
-                        if dia_mes_visual in mapa_dias_mes_calculados:
-                            dia_datos = mapa_dias_mes_calculados[dia_mes_visual]
-                            
+                        # 1. Estrategia Principal: Buscar usando el número de día del mes
+                        if dia_mes_visual in mapa_por_dia_mes:
+                            dia_datos = mapa_por_dia_mes[dia_mes_visual]
                             if 'Fecha' in dia_datos and pd.notna(dia_datos['Fecha']):
-                                fecha_exacta_str = pd.to_datetime(dia_datos['Fecha']).strftime('%Y-%m-%d')
-                                llave_exacta = (nombre_norm_func, fecha_exacta_str)
-                                minutos_p = df_permisos_dict.get(llave_exacta, 0)
+                                f_str = pd.to_datetime(dia_datos['Fecha']).strftime('%Y-%m-%d')
+                                llave = (nombre_norm_func, f_str)
+                                minutos_p = df_permisos_dict.get(llave, 0)
+                        
+                        # 2. Estrategia de Respaldo: Reconstruir la fecha del mes en base al período activo si no cruzó
+                        if minutos_p == 0 and fecha_mes:
+                            f_reconstruida = f"{fecha_mes.year}-{fecha_mes.month:02d}-{dia_mes_visual:02d}"
+                            llave_backup = (nombre_norm_func, f_reconstruida)
+                            minutos_p = df_permisos_dict.get(llave_backup, 0)
                     
+                    # Formatear el resultado a texto HH:MM
                     if minutos_p > 0:
                         horas_permiso_lista.append(f"{minutos_p // 60:02d}:{minutos_p % 60:02d}")
                     else:
                         horas_permiso_lista.append("00:00")
                 
-                # Inyección limpia en el DataFrame visual
+                # Inyección limpia de la columna modificada
                 columnas = list(df_detalle.columns)
                 if 'Permiso Externo (Horas)' in columnas:
                     df_detalle['Permiso Externo (Horas)'] = horas_permiso_lista
@@ -484,7 +499,7 @@ with col3:
     )
 
 # =====================================================================
-# 🛠️ PANEL DE DIAGNÓSTICO FILTRADO EXACTO (SIN MEZCLAR OTRAS PERSONAS) 🛠️
+# 🛠️ PANEL DE DIAGNÓSTICO FILTRADO EXACTO
 # =====================================================================
 st.markdown("---")
 st.subheader("🛠️ Panel de Diagnóstico e Inspección de Datos")
