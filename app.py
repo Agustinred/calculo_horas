@@ -400,76 +400,54 @@ if len(funcionarios_filtrados) > 0:
                 
                 df_detalle = Formatter.crear_df_detalle_semana(semana_info['días'])
                 
-                # ====================================================================================
-                # 🔬 DETECTOR DE ERRORES EN TIEMPO REAL (BLOQUE ÚNICO COMPARTIDO Y OPTIMIZADO)
+               # ====================================================================================
+                # 🔬 DETECTOR DE ERRORES REPARADO (CONSTRUCCIÓN DE LLAVE CON FECHA REAL)
                 # ====================================================================================
                 horas_permiso_lista = []
                 diagnostico_llaves_intentadas = []
                 diagnostico_estado_cruce = []
 
+                # Mapeo de días para obtener la fecha real
                 lista_dias_interna = (
                     resultado_funcionario.get('dias_por_semana', {}).get(semana_num, []) or 
                     resultado_funcionario.get('dias_por_semana', {}).get(str(semana_num), [])
                 )
-
                 mapa_por_dia_mes = {}
                 for dia_datos in lista_dias_interna:
                     if 'Fecha' in dia_datos and pd.notna(dia_datos['Fecha']):
-                        try:
-                            dt_obj = pd.to_datetime(dia_datos['Fecha'])
-                            mapa_por_dia_mes[dt_obj.day] = dia_datos
-                        except:
-                            continue
+                        dt_obj = pd.to_datetime(dia_datos['Fecha'])
+                        mapa_por_dia_mes[dt_obj.day] = dt_obj.strftime('%Y-%m-%d') # Guardamos fecha formato ISO
 
                 for idx, fila in df_detalle.iterrows():
                     minutos_p = 0
                     texto_dia_columna = str(fila.get('Día', '')).upper()
                     match_numero = re.search(r'\d+', texto_dia_columna)
                     
-                    llave_evaluada = "No se pudo extraer día"
-                    estado_rastreo = "❌ Sin número de día"
+                    llave_buscada = "N/A"
+                    estado_rastreo = "❌ No se pudo determinar fecha"
                     
                     if match_numero:
-                        dia_mes_visual = int(match_numero.group())
+                        dia_mes = int(match_numero.group())
                         
-                        # Definición anticipada de la tupla de respaldo
-                        if fecha_mes:
-                            f_reconstruida = f"{fecha_mes.year}-{fecha_mes.month:02d}-{dia_mes_visual:02d}"
-                            llave_evaluada = f"('{nombre_norm_func}', '{f_reconstruida}')"
-                        else:
-                            llave_evaluada = f"('{nombre_norm_func}', 'Día {dia_mes_visual}')"
-                        
-                        estado_rastreo = f"❌ Día {dia_mes_visual} extraído, pero sin match"
-                        
-                        # 1. Intentar por mapa directo
-                        if dia_mes_visual in mapa_por_dia_mes:
-                            dia_datos = mapa_por_dia_mes[dia_mes_visual]
-                            if 'Fecha' in dia_datos and pd.notna(dia_datos['Fecha']):
-                                f_str = pd.to_datetime(dia_datos['Fecha']).strftime('%Y-%m-%d')
-                                llave_evaluada = f"('{nombre_norm_func}', '{f_str}')"
-                                llave_tupla = (nombre_norm_func, f_str)
-                                
-                                if llave_tupla in df_permisos_dict:
-                                    minutos_p = df_permisos_dict[llave_tupla]
-                                    estado_rastreo = f"✅ MATCH PERFECTO ({minutos_p} min)"
-                                else:
-                                    estado_rastreo = "❌ Llave no existe en diccionario"
-                                    
-                        # 2. Forzar estrategia de respaldo explícita si la anterior dio 0
-                        if minutos_p == 0 and fecha_mes:
-                            llave_backup = (nombre_norm_func, f_reconstruida)
-                            if llave_backup in df_permisos_dict:
-                                minutos_p = df_permisos_dict[llave_backup]
-                                estado_rastreo = f"✅ MATCH RESPALDO ({minutos_p} min)"
+                        # Intentar obtener la fecha real del mapeo
+                        if dia_mes in mapa_por_dia_mes:
+                            fecha_real = mapa_por_dia_mes[dia_mes]
+                            llave_buscada = f"('{nombre_norm_func}', '{fecha_real}')"
+                            
+                            if (nombre_norm_func, fecha_real) in df_permisos_dict:
+                                minutos_p = df_permisos_dict[(nombre_norm_func, fecha_real)]
+                                estado_rastreo = f"✅ MATCH PERFECTO ({minutos_p} min)"
                             else:
-                                estado_rastreo = "❌ No existe la tupla en la BD"
+                                estado_rastreo = "❌ Llave no existe en diccionario"
+                        else:
+                            estado_rastreo = f"❌ Día {dia_mes} no encontrado en datos de semana"
 
                     if minutos_p > 0:
                         horas_permiso_lista.append(f"{minutos_p // 60:02d}:{minutos_p % 60:02d}")
                     else:
                         horas_permiso_lista.append("00:00")
                         
-                    diagnostico_llaves_intentadas.append(llave_evaluada)
+                    diagnostico_llaves_intentadas.append(llave_buscada)
                     diagnostico_estado_cruce.append(estado_rastreo)
 
                 df_detalle['Permiso Externo (Horas)'] = horas_permiso_lista
@@ -478,7 +456,7 @@ if len(funcionarios_filtrados) > 0:
 
                 st.dataframe(df_detalle, use_container_width=True, hide_index=True)
                 st.markdown("---")
-# ====================================================================================
+                # ====================================================================================
 
 # EXPORTACIÓN
 st.subheader("📥 Exportar Resultados")
