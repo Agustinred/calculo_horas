@@ -55,7 +55,7 @@ class DataLoader:
                 errores.append("❌ No se encontró 'Hoja2' en el Excel")
                 return None, None, None, errores
             
-            # Leer Hoja1
+            # Leer Hoja1 y Hoja2
             df_hoja1 = pd.read_excel(excel_file, sheet_name='Hoja1')
             df_hoja2 = pd.read_excel(excel_file, sheet_name='Hoja2')
             
@@ -76,12 +76,26 @@ class DataLoader:
                 errores.append(f"❌ Hoja2 debe tener columnas: NOMBRE, GERENCIA")
                 return None, None, None, errores
             
-            # Extraer fecha de referencia
+            # Extraer fecha de referencia (Mes y Año base del reporte)
             fecha_mes = DataLoader._extraer_fecha(df_hoja1)
             
-            # Limpiar datos
+            # Limpiar datos básicos
             df_hoja1 = DataLoader._limpiar_hoja1(df_hoja1)
             df_hoja2 = DataLoader._limpiar_hoja2(df_hoja2)
+            
+            # ✨ NUEVA LÓGICA: Construir dinámicamente la columna 'Fecha' para evitar KeyError en app.py y calculator.py
+            if fecha_mes is not None and 'Número' in df_hoja1.columns:
+                def construir_fecha(num_dia):
+                    try:
+                        if pd.isna(num_dia):
+                            return None
+                        # Convertir a entero limpio por si viene como flotante desde Excel
+                        dia = int(float(num_dia))
+                        return pd.Timestamp(year=fecha_mes.year, month=fecha_mes.month, day=dia)
+                    except:
+                        return None
+                
+                df_hoja1['Fecha'] = df_hoja1['Número'].apply(construir_fecha)
             
             return df_hoja1, df_hoja2, fecha_mes, []
         
@@ -93,7 +107,7 @@ class DataLoader:
     def _extraer_fecha(df):
         """Extrae mes/año de la hoja1"""
         try:
-            # Buscar en las primeras filas cualquier fecha
+            # Buscar en las primeras filas cualquier objeto de fecha
             for col in df.columns:
                 for valor in df[col].head(10):
                     if isinstance(valor, (pd.Timestamp, datetime)):
@@ -110,7 +124,7 @@ class DataLoader:
         # Convertir Nombre a minúsculas sin tildes
         df['Nombre_Normalizado'] = df['Nombre'].apply(DataLoader.normalizar_texto)
         
-        # Validar que no haya filas vacías
+        # Validar que no haya filas vacías en la columna crítica
         df = df.dropna(subset=['Nombre'])
         
         # Convertir tiempos a formato HH:MM
