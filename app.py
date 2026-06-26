@@ -139,13 +139,46 @@ if uploaded_file_permisos:
                         minutos = 0
             
             if key in df_permisos_dict:
-                df_permisos_dict[key] += minutos
+                df_permisos_dict[key] += minutes
             else:
-                df_permisos_dict[key] = minutos
+                df_permisos_dict[key] = minutes
                 
         st.sidebar.success(f"✅ Se cargaron {len(df_permisos_dict)} registros de permisos basados en 'FechaInicio'.")
     except Exception as e:
         st.sidebar.error(f"⚠️ Nota sobre permisos: No se pudo procesar el archivo opcional ({e})")
+
+# =========================================================================
+# 🔍 PANEL DE DIAGNÓSTICO EN TIEMPO REAL (INTEGRADO EN INTERFAZ WEB)
+# =========================================================================
+st.subheader("⚙️ Herramienta de Inspección de Cruces en Memoria")
+with st.expander("🔍 Analizar Diccionario Global de Permisos Externos", expanded=False):
+    if df_permisos_dict:
+        st.write(f"📊 **Total de registros llave construidos en memoria:** {len(df_permisos_dict)}")
+        
+        # Formulario interactivo rápido para auditar si una tupla matemática exacta existe
+        st.write("🧪 **Simulador de Búsqueda Manual de Coincidencias:**")
+        col_d1, col_d2 = st.columns(2)
+        with col_d1:
+            nombre_prueba = st.text_input("Nombre a evaluar (Normalizado):", placeholder="EJ: CLAUDIA ALEJANDRA ABARCA MANRIQUEZ", key="diag_nom_input")
+        with col_d2:
+            fecha_prueba = st.text_input("Fecha a evaluar (AAAA-MM-DD):", placeholder="EJ: 2026-01-09", key="diag_fec_input")
+            
+        if nombre_prueba and fecha_prueba:
+            llave_prueba = (nombre_prueba.strip().upper(), fecha_prueba.strip())
+            st.markdown("---")
+            st.write(f"🔎 *Buscando tupla matemática:* `{llave_prueba}`")
+            if llave_prueba in df_permisos_dict:
+                st.success(f"✅ ¡COINCIDENCIA ENCONTRADA EN DICCIONARIO! Valor: {df_permisos_dict[llave_prueba]} minutos.")
+            else:
+                st.error("❌ La llave no existe tal cual en el diccionario. Revisa espacios o formatos de fecha.")
+        
+        st.write("📋 **Vista previa en formato JSON de las primeras 20 llaves en memoria:**")
+        muestra_dict = {str(k): f"{v} mins" for k, v in list(df_permisos_dict.items())[:20]}
+        st.json(muestra_dict)
+    else:
+        st.info("💡 No hay datos en el diccionario de permisos. Carga un archivo de permisos en la barra lateral para poblar el inspector.")
+st.markdown("---")
+# =========================================================================
 
 # Procesar archivo principal de asistencia
 archivo = archivos_subidos
@@ -339,7 +372,7 @@ if len(funcionarios_filtrados) > 0:
                 )
                 semanas_a_mostrar = [semana_seleccionada]
             else:
-                semanas_a_mostrar = semanas_disponibles
+                semanas_a_mostrar = weeks = semanas_disponibles
             
             for semana_num in semanas_a_mostrar:
                 semana_info = resultado_funcionario['semanas'][semana_num]
@@ -379,22 +412,17 @@ if len(funcionarios_filtrados) > 0:
                         mapa_fechas_calculadas[f_str] = dia_datos
 
                 # Construimos la lista de permisos alineada PERFECTAMENTE con las filas de df_detalle
-                # Asumimos que df_detalle tiene una columna 'Día' (ej: "LUNES 5", "MARTES 6") o una columna 'Fecha'
-                # Para máxima seguridad, usamos el correlativo de la lista interna que armó el DataFrame original
                 for idx, fila in df_detalle.iterrows():
                     minutos_p = 0
                     
-                    # Intentamos recuperar los datos del día correspondientes a esta posición de fila
                     if idx < len(lista_dias_interna):
                         dia_datos = lista_dias_interna[idx]
                         obs_dia = str(dia_datos.get('observacion', '')).strip().lower()
                         
-                        # Independiente de la observación o si ya existe, buscamos si tiene un permiso asignado en la base externa
                         if 'Fecha' in dia_datos and pd.notna(dia_datos['Fecha']):
                             fecha_exacta_str = pd.to_datetime(dia_datos['Fecha']).strftime('%Y-%m-%d')
                             llave_exacta = (nombre_norm_func, fecha_exacta_str)
                             
-                            # Si deseas que SIEMPRE muestre las horas cuando exista el permiso (incluso si tiene la observación)
                             minutos_p = df_permisos_dict.get(llave_exacta, 0)
                     
                     if minutos_p > 0:
