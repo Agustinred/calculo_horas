@@ -129,9 +129,20 @@ class HorasCalculator:
                 llave_ymd = (nombre_normalizado, fmt_ymd)
                 llave_dmy = (nombre_normalizado, fmt_dmy)
                 
+                # Herramienta de Diagnóstico en terminal para verificar las claves generadas
+                match_ymd = llave_ymd in dict_permisos
+                match_dmy = llave_dmy in dict_permisos
+                print(f"[DIAGNÓSTICO] Funcionario: {nombre_normalizado} | Fecha Evaluada: {fecha_completa_str}")
+                print(f"  -> Buscando Llave YMD {llave_ymd}: {'✅ ENCONTRADA' if match_ymd else '❌ NO EXISTE'}")
+                print(f"  -> Buscando Llave DMY {llave_dmy}: {'✅ ENCONTRADA' if match_dmy else '❌ NO EXISTE'}")
+                
                 minutos_permiso_externo = dict_permisos.get(llave_ymd, dict_permisos.get(llave_dmy, 0))
-            except:
+                print(f"  -> Minutos rescatados: {minutos_permiso_externo}")
+            except Exception as e:
                 llave_cruce = (nombre_normalizado, fecha_completa_str)
+                match_cruce = llave_cruce in dict_permisos
+                print(f"[DIAGNÓSTICO FALLBACK] Error parseo fecha: {e}")
+                print(f"  -> Buscando Llave Directa {llave_cruce}: {'✅ ENCONTRADA' if match_cruce else '❌ NO EXISTE'}")
                 minutos_permiso_externo = dict_permisos.get(llave_cruce, 0)
 
         # 1. EVALUAR SI HAY UNA COMBINACIÓN COMPLETA PRIMERO
@@ -178,8 +189,6 @@ class HorasCalculator:
             elif hora_entrada != "" and hora_salida == "":
                 alerta = f"{nombre_display} - Día {numero_dia} ({dia_semana}): Falta HoraSalida"
             elif hora_entrada == "" and hora_salida == "":
-                # Si no registra marcas reales pero sí posee horas cargadas desde fuera, 
-                # se le reconocen los minutos externos sin levantar alerta crítica de falta absoluta
                 if minutos_permiso_externo > 0:
                     return minutos_permiso_externo, minutos_permiso_externo, None
                 alerta = f"{nombre_display} - Día {numero_dia} ({dia_semana}): Falta Marcación Completa (Entrada y Salida)"
@@ -245,7 +254,7 @@ class HorasCalculator:
                     row, fecha_completa_str=fecha_str, dict_permisos=dict_permisos
                 )
                 
-                minutos_semana += minutes_dia if 'minutes_dia' in locals() else minutos_dia
+                minutos_semana += minutos_dia
                 acumulado += minutos_dia
                 
                 if alerta:
@@ -258,7 +267,7 @@ class HorasCalculator:
                     'hora_salida': row.get('HoraSalida', ''),
                     'minutos': minutos_dia,
                     'acumulado': acumulado,
-                    'minutos_externos': minutos_externos,  # Guardamos el valor exacto para la UI
+                    'minutos_externos': minutos_externos,
                     'observacion': row.get('Observacion', '')
                 })
             
