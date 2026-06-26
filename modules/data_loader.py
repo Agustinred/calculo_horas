@@ -1,5 +1,6 @@
 """
 data_loader.py - Carga y valida archivos Excel
+ACTUALIZADO: Incluye función para construir diccionario de permisos
 """
 
 import pandas as pd
@@ -175,3 +176,115 @@ class DataLoader:
             return valor.strftime('%H:%M')
         
         return None
+    
+    # ========================================================================
+    # 🆕 NUEVA FUNCIÓN: Construir diccionario de permisos desde Excel
+    # ========================================================================
+    @staticmethod
+    def construir_dict_permisos(archivo_permisos):
+        """
+        Construye diccionario: {(nombre_normalizado, fecha): minutos_totales}
+        
+        Este diccionario se usa en calculator.py para buscar permisos por:
+        - Nombre del funcionario (normalizado)
+        - Fecha del permiso (formato YYYY-MM-DD)
+        
+        Args:
+            archivo_permisos: Objeto file de Streamlit o path a archivo Excel
+            
+        Returns:
+            dict: {(nombre_normalizado, YYYY-MM-DD): minutos_totales}
+            dict: {nombre_normalizado: lista de (fecha, horas)} para diagnóstico
+        """
+        dict_permisos = {}
+        debug_df_permisos = pd.DataFrame()
+        
+        if not archivo_permisos:
+            return dict_permisos, debug_df_permisos
+        
+        try:
+            # Leer archivo de permisos
+            df_p = pd.read_excel(archivo_permisos)
+            
+            # Validar que existan las columnas críticas
+            cols_requeridas = {'ApellidoPaterno', 'ApellidoMaterno', 'Nombres', 'FechaInicio', 'CantidadEnHora'}
+            if not cols_requeridas.issubset(set(df_p.columns)):
+                return {}, debug_df_permisos
+            
+            registros_procesados = 0
+            
+            for idx, row in df_p.iterrows():
+                try:
+                    # 1️⃣ Construir nombre: Nombres ApellidoPaterno ApellidoMaterno
+                    nombres = str(row['Nombres']).strip() if pd.notna(row['Nombres']) else ""
+                    ap_paterno = str(row['ApellidoPaterno']).strip() if pd.notna(row['ApellidoPaterno']) else ""
+                    ap_materno = str(row['ApellidoMaterno']).strip() if pd.notna(row['ApellidoMaterno']) else ""
+                    
+                    nombre_completo = f"{nombres} {ap_paterno} {ap_materno}".strip()
+                    nombre_normalizado = DataLoader.normalizar_texto(nombre_completo)
+                    
+                    if not nombre_normalizado:
+                        continue
+                    
+                    # 2️⃣ Extraer fecha (formato ISO: YYYY-MM-DD)
+                    fecha_raw = row['FechaInicio']
+                    if pd.isna(fecha_raw):
+                        continue
+                        
+                    try:
+                        fecha_obj = pd.to_datetime(fecha_raw)
+                        fecha_str = fecha_obj.strftime('%Y-%m-%d')
+                    except:
+                        continue
+                    
+                    # 3️⃣ Convertir CantidadEnHora a minutos
+                    # CantidadEnHora viene en formato "HH:MM" (ej: "08:00", "09:00", "01:00")
+                    cantidad_raw = row['CantidadEnHora']
+                    
+                    if pd.isna(cantidad_raw):
+                        minutos = 0
+                    else:
+                        try:
+                            cantidad_str = str(cantidad_raw).strip()
+                            
+                            # Si es formato HH:MM
+                            if ':' in cantidad_str:
+                                partes = cantidad_str.split(':')
+                                horas = int(partes[0])
+                                mins = int(partes[1])
+                                minutos = horas * 60 + mins
+                            else:
+                                # Si es número decimal
+                                horas = float(cantidad_str)
+                                minutos = int(horas * 60)
+                        except (ValueError, TypeError, IndexError):
+                            minutos = 0
+                    
+                    if minutos <= 0:
+                        continue
+                    
+                    # 4️⃣ Crear llave y sumar en diccionario
+                    llave = (nombre_normalizado, fecha_str)
+                    
+                    if llave in dict_permisos:
+                        dict_permisos[llave] += minutos  # Acumular si hay múltiples registros
+                    else:
+                        dict_permisos[llave] = minutos
+                    
+                    registros_procesados += 1
+                        
+                except Exception as e:
+                    continue
+            
+            # Guardar copia para diagnóstico
+            debug_df_permisos = df_p.copy()
+            debug_df_permisos['Nombre_Normalizado'] = debug_df_permisos.apply(
+                lambda row: DataLoader.normalizar_texto(
+                    f"{row['Nombres']} {row['ApellidoPaterno']} {row['ApellidoMaterno']}"
+                ), axis=1
+            )
+            
+            return dict_permisos, debug_df_permisos
+            
+        except Exception as e:
+            return {}, pd.DataFrame()
