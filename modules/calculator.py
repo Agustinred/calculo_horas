@@ -128,15 +128,24 @@ class HorasCalculator:
             salida_min = HorasCalculator._hora_a_minutos(hora_salida)
             minutos_reales = max(0, salida_min - entrada_min)
             
-        # 3. CRUCE ESTRICTO: PERMISO COMPLEMENTARIO POR HORAS
-        # Solo extrae datos si la observación contiene explícitamente la instrucción de cruce
+        # 3. CRUCE ESTRICTO: PERMISO COMPLEMENTARIO POR HORAS (CON IDENTIFICACIÓN ROBUSTA DE FECHAS)
         if "per. comple. (horas)" in obs_lower or "per. comple (horas)" in obs_lower:
             minutos_permiso_externo = 0
             if fecha_completa_str:
-                llave_cruce = (nombre_normalizado, fecha_completa_str)
-                # Al buscar la fecha_completa_str del día en curso (ej: '2026-01-06'), 
-                # si el permiso es de febrero ('2026-02-06'), no coincidirá y devolverá 0.
-                minutos_permiso_externo = dict_permisos.get(llave_cruce, 0)
+                try:
+                    # Se evalúan dinámicamente variaciones de formatos comunes (YYYY-MM-DD y DD-MM-YYYY)
+                    ts = pd.to_datetime(fecha_completa_str)
+                    fmt_ymd = ts.strftime('%Y-%m-%d')
+                    fmt_dmy = ts.strftime('%d-%m-%Y')
+                    
+                    llave_ymd = (nombre_normalizado, fmt_ymd)
+                    llave_dmy = (nombre_normalizado, fmt_dmy)
+                    
+                    minutos_permiso_externo = dict_permisos.get(llave_ymd, dict_permisos.get(llave_dmy, 0))
+                except:
+                    # Respaldo de texto directo
+                    llave_cruce = (nombre_normalizado, fecha_completa_str)
+                    minutos_permiso_externo = dict_permisos.get(llave_cruce, 0)
             
             total_dia = minutos_reales + minutos_permiso_externo
             return total_dia, None
@@ -223,10 +232,13 @@ class HorasCalculator:
             acumulado = 0
             
             for _, row in df_semana.iterrows():
-                # Reconstrucción fidedigna del string de fecha (YYYY-MM-DD)
+                # Reconstrucción del string de fecha de forma controlada y limpia
                 fecha_str = None
                 if 'Fecha' in row and pd.notna(row['Fecha']):
-                    fecha_str = pd.to_datetime(row['Fecha']).strftime('%Y-%m-%d')
+                    try:
+                        fecha_str = pd.to_datetime(row['Fecha']).strftime('%Y-%m-%d')
+                    except:
+                        fecha_str = str(row['Fecha']).split()[0]
                 
                 minutos_dia, alerta = HorasCalculator.calcular_horas_dia(
                     row, fecha_completa_str=fecha_str, dict_permisos=dict_permisos
