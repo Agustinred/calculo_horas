@@ -78,7 +78,7 @@ if not archivos_subidos:
     """)
     st.stop()
 
-# Procesamiento de la Base de Permisos Externa con Orden Solicitado
+# Procesamiento de la Base de Permisos Externa
 df_permisos_dict = {}
 debug_df_permisos = pd.DataFrame()
 
@@ -398,70 +398,78 @@ if len(funcionarios_filtrados) > 0:
                 df_detalle = Formatter.crear_df_detalle_semana(semana_info['días'])
                 
 # ====================================================================================
-                # 🔄 MOTOR DE CRUCE DINÁMICO ULTRA REFORZADO (ANTI-DESFASES Y TIPOS)
+                # 🔬 DETECTOR DE ERRORES EN TIEMPO REAL (INYECCIÓN DE DIAGNÓSTICO)
 # ====================================================================================
                 horas_permiso_lista = []
+                diagnostico_llaves_intentadas = []
+                diagnostico_estado_cruce = []
+
                 lista_dias_interna = resultado_funcionario.get('dias_por_semana', {}).get(semana_num, [])
-                
-                # Mapeamos los datos de cálculo usando múltiples llaves redundantes
+
+                # Mapeamos lo que calcula el motor por detrás
                 mapa_por_dia_mes = {}
-                mapa_por_fecha_str = {}
-                
                 for dia_datos in lista_dias_interna:
                     if 'Fecha' in dia_datos and pd.notna(dia_datos['Fecha']):
                         try:
                             dt_obj = pd.to_datetime(dia_datos['Fecha'])
-                            num_dia = dt_obj.day
-                            str_fecha = dt_obj.strftime('%Y-%m-%d')
-                            
-                            mapa_por_dia_mes[num_dia] = dia_datos
-                            mapa_por_fecha_str[str_fecha] = dia_datos
-                        except Exception:
+                            mapa_por_dia_mes[dt_obj.day] = dia_datos
+                        except:
                             continue
 
-                # Recorremos cada fila visual del DataFrame de Streamlit
+                # Recorremos cada fila que estás viendo en pantalla
                 for idx, fila in df_detalle.iterrows():
                     minutos_p = 0
                     texto_dia_columna = str(fila.get('Día', '')).upper()
-                    
-                    # Intentar extraer el número de día (Ej: "VIERNES 9" -> 9)
                     match_numero = re.search(r'\d+', texto_dia_columna)
+                    
+                    llave_evaluada = "No se pudo extraer día"
+                    estado_rastreo = "❌ Sin número de día"
                     
                     if match_numero:
                         dia_mes_visual = int(match_numero.group())
+                        estado_rastreo = f"❌ Día {dia_mes_visual} extraído, pero no mapeado en la semana"
                         
-                        # 1. Estrategia Principal: Buscar usando el número de día del mes
                         if dia_mes_visual in mapa_por_dia_mes:
                             dia_datos = mapa_por_dia_mes[dia_mes_visual]
                             if 'Fecha' in dia_datos and pd.notna(dia_datos['Fecha']):
                                 f_str = pd.to_datetime(dia_datos['Fecha']).strftime('%Y-%m-%d')
-                                llave = (nombre_norm_func, f_str)
-                                minutos_p = df_permisos_dict.get(llave, 0)
-                        
-                        # 2. Estrategia de Respaldo: Reconstruir la fecha del mes en base al período activo si no cruzó
-                        if minutos_p == 0 and fecha_mes:
-                            f_reconstruida = f"{fecha_mes.year}-{fecha_mes.month:02d}-{dia_mes_visual:02d}"
-                            llave_backup = (nombre_norm_func, f_reconstruida)
-                            minutos_p = df_permisos_dict.get(llave_backup, 0)
-                    
-                    # Formatear el resultado a texto HH:MM
+                                llave_evaluada = f"('{nombre_norm_func}', '{f_str}')"
+                                
+                                # Intentamos buscar en el diccionario real
+                                llave_tupla = (nombre_norm_func, f_str)
+                                if llave_tupla in df_permisos_dict:
+                                    minutos_p = df_permisos_dict[llave_tupla]
+                                    estado_rastreo = f"✅ MATCH PERFECTO ({minutos_p} min)"
+                                else:
+                                    estado_rastreo = "❌ Llave no existe en diccionario"
+                        else:
+                            # Estrategia de respaldo por mes activo
+                            if fecha_mes:
+                                f_reconstructed = f"{fecha_mes.year}-{fecha_mes.month:02d}-{dia_mes_visual:02d}"
+                                llave_evaluada = f"('{nombre_norm_func}', '{f_reconstructed}') (Reconstruida)"
+                                llave_backup = (nombre_norm_func, f_reconstructed)
+                                if llave_backup in df_permisos_dict:
+                                    minutos_p = df_permisos_dict[llave_backup]
+                                    estado_rastreo = f"✅ MATCH RESPALDO ({minutos_p} min)"
+                                else:
+                                    estado_rastreo = "❌ Llave reconstruida no existe"
+
                     if minutos_p > 0:
                         horas_permiso_lista.append(f"{minutos_p // 60:02d}:{minutos_p % 60:02d}")
                     else:
                         horas_permiso_lista.append("00:00")
-                
-                # Inyección limpia de la columna modificada
-                columnas = list(df_detalle.columns)
-                if 'Permiso Externo (Horas)' in columnas:
-                    df_detalle['Permiso Externo (Horas)'] = horas_permiso_lista
-                elif 'Observación' in columnas:
-                    idx_obs = columnas.index('Observación')
-                    df_detalle.insert(idx_obs, 'Permiso Externo (Horas)', horas_permiso_lista)
-                else:
-                    df_detalle['Permiso Externo (Horas)'] = horas_permiso_lista
-                
+                        
+                    diagnostico_llaves_intentadas.append(llave_evaluada)
+                    diagnostico_estado_cruce.append(estado_rastreo)
+
+                # Inyectamos las columnas de diagnóstico a la vista para ver el comportamiento
+                df_detalle['Permiso Externo (Horas)'] = horas_permiso_lista
+                df_detalle['🔬 Llave que Buscó'] = diagnostico_llaves_intentadas
+                df_detalle['⚙️ Resultado del Cruce'] = diagnostico_estado_cruce
+
                 st.dataframe(df_detalle, use_container_width=True, hide_index=True)
                 st.markdown("---")
+# ====================================================================================
 
 # EXPORTACIÓN
 st.subheader("📥 Exportar Resultados")
@@ -498,50 +506,14 @@ with col3:
         use_container_width=True
     )
 
-# =====================================================================
-# 🛠️ PANEL DE DIAGNÓSTICO FILTRADO EXACTO
-# =====================================================================
+# Panel estático inferior de apoyo
 st.markdown("---")
-st.subheader("🛠️ Panel de Diagnóstico e Inspección de Datos")
-with st.expander("🔎 Haz clic aquí para inspeccionar las llaves de cruce exactas"):
-    
+st.subheader("🛠️ Panel de Diagnóstico Secundario")
+with st.expander("🔎 Ver detalles secundarios del funcionario seleccionado"):
     nombre_a_diagnosticar = normalizar_texto_local(funcionario_seleccionado) if funcionarios_filtrados else ""
-    
     if nombre_a_diagnosticar:
         st.write(f"### Análisis enfocado en: `{nombre_a_diagnosticar}`")
-        
-        st.write("### 1. Inspección de Datos en Asistencia (Hoja 1):")
-        if 'df_h1' in locals():
-            col_nombre_real = [c for c in df_h1.columns if 'nombre' in str(c).lower()]
-            if col_nombre_real:
-                col_a_usar = col_nombre_real[0]
-                df_asist_filtrado = df_h1[df_h1['Nombre_Normalizado'] == nombre_a_diagnosticar]
-                
-                if not df_asist_filtrado.empty:
-                    st.success(f"🔍 ¡Funcionario encontrado de forma exacta en Asistencia!")
-                    st.write(f"**Nombre Crudo original:** `{df_asist_filtrado[col_a_usar].iloc[0]}`")
-                    st.write(f"**Nombre Normalizado:** `{df_asist_filtrado['Nombre_Normalizado'].iloc[0]}`")
-                    columnas_existentes = [col_a_usar, 'Nombre_Normalizado'] + [c for c in ['Fecha', 'DiaSemana', 'DiaPalabra'] if c in df_h1.columns]
-                    st.dataframe(df_asist_filtrado[columnas_existentes].head(5))
-                else:
-                    st.error(f"❌ El nombre exacto `{nombre_a_diagnosticar}` no está en la base de asistencia.")
-                    
-        st.write("### 2. Inspección en Archivo de Permisos:")
         if not debug_df_permisos.empty:
             df_perm_filtrado = debug_df_permisos[debug_df_permisos['Nombre_Normalizado'] == nombre_a_diagnosticar]
             if not df_perm_filtrado.empty:
-                st.success(f"🔍 ¡Registros encontrados en Permisos!")
                 st.dataframe(df_perm_filtrado[['Nombre_Completo_Raw', 'Nombre_Normalizado', 'Fecha_Str', 'CantidadEnHora']])
-            else:
-                st.error(f"❌ No hay registros que coincidan exactamente con `{nombre_a_diagnosticar}` en los permisos.")
-
-        st.write("### 3. Claves activas en el diccionario de cruce:")
-        if df_permisos_dict:
-            claves_funcionario = {k: v for k, v in df_permisos_dict.items() if k[0] == nombre_a_diagnosticar}
-            if claves_funcionario:
-                st.write("Claves generadas para este funcionario (Estructura: `(Nombre, Fecha)` -> Minutos):")
-                st.json({str(k): f"{v} minutos" for k, v in claves_funcionario.items()})
-            else:
-                st.warning("No se generaron llaves válidas en el diccionario para este nombre.")
-    else:
-        st.info("Carga los archivos para ver el diagnóstico detallado de un funcionario.")
