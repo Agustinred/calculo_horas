@@ -123,7 +123,7 @@ if uploaded_file_permisos:
             fecha_llave = str(row['Fecha_Str']).strip()
             key = (nombre_llave, fecha_llave)
             
-            cantidad_raw = row['CantidadEnHora']
+            cantidad_raw = row['QuantityInHours'] if 'QuantityInHours' in df_p.columns else row.get('CantidadEnHora', 0)
             minutos = 0
             
             if pd.notna(cantidad_raw):
@@ -144,7 +144,7 @@ if uploaded_file_permisos:
             if key in df_permisos_dict:
                 df_permisos_dict[key] += minutos
             else:
-                df_permisos_dict[key] = minutes = minutos
+                df_permisos_dict[key] = minutos
                 
         st.sidebar.success(f"✅ Se cargaron {len(df_permisos_dict)} registros de permisos basados en 'FechaInicio'.")
     except Exception as e:
@@ -400,20 +400,18 @@ if len(funcionarios_filtrados) > 0:
                 
                 df_detalle = Formatter.crear_df_detalle_semana(semana_info['días'])
                 
-# ====================================================================================
-                # 🔬 DETECTOR DE ERRORES EN TIEMPO REAL (VERSIÓN FINAL ULTRA REFORZADA)
-# ====================================================================================
+                # ====================================================================================
+                # 🔬 DETECTOR DE ERRORES EN TIEMPO REAL (BLOQUE ÚNICO COMPARTIDO Y OPTIMIZADO)
+                # ====================================================================================
                 horas_permiso_lista = []
                 diagnostico_llaves_intentadas = []
                 diagnostico_estado_cruce = []
 
-                # Obtener la lista de días manejando llaves string o enteras para mayor compatibilidad
                 lista_dias_interna = (
                     resultado_funcionario.get('dias_por_semana', {}).get(semana_num, []) or 
                     resultado_funcionario.get('dias_por_semana', {}).get(str(semana_num), [])
                 )
 
-                # Mapeamos lo que calcula el motor por detrás
                 mapa_por_dia_mes = {}
                 for dia_datos in lista_dias_interna:
                     if 'Fecha' in dia_datos and pd.notna(dia_datos['Fecha']):
@@ -423,7 +421,6 @@ if len(funcionarios_filtrados) > 0:
                         except:
                             continue
 
-                # Recorremos cada fila visual del dataframe de Streamlit
                 for idx, fila in df_detalle.iterrows():
                     minutos_p = 0
                     texto_dia_columna = str(fila.get('Día', '')).upper()
@@ -434,33 +431,38 @@ if len(funcionarios_filtrados) > 0:
                     
                     if match_numero:
                         dia_mes_visual = int(match_numero.group())
+                        
+                        # Definición anticipada de la tupla de respaldo
+                        if fecha_mes:
+                            f_reconstruida = f"{fecha_mes.year}-{fecha_mes.month:02d}-{dia_mes_visual:02d}"
+                            llave_evaluada = f"('{nombre_norm_func}', '{f_reconstruida}')"
+                        else:
+                            llave_evaluada = f"('{nombre_norm_func}', 'Día {dia_mes_visual}')"
+                        
                         estado_rastreo = f"❌ Día {dia_mes_visual} extraído, pero sin match"
                         
-                        # 1. Intentar match por el mapa directo del backend
+                        # 1. Intentar por mapa directo
                         if dia_mes_visual in mapa_por_dia_mes:
                             dia_datos = mapa_por_dia_mes[dia_mes_visual]
                             if 'Fecha' in dia_datos and pd.notna(dia_datos['Fecha']):
                                 f_str = pd.to_datetime(dia_datos['Fecha']).strftime('%Y-%m-%d')
                                 llave_evaluada = f"('{nombre_norm_func}', '{f_str}')"
-                                
                                 llave_tupla = (nombre_norm_func, f_str)
+                                
                                 if llave_tupla in df_permisos_dict:
                                     minutos_p = df_permisos_dict[llave_tupla]
                                     estado_rastreo = f"✅ MATCH PERFECTO ({minutos_p} min)"
                                 else:
                                     estado_rastreo = "❌ Llave no existe en diccionario"
                                     
-                        # 2. Estrategia de respaldo infalible (Reconstrucción directa por Mes Activo)
+                        # 2. Forzar estrategia de respaldo explícita si la anterior dio 0
                         if minutos_p == 0 and fecha_mes:
-                            f_reconstruida = f"{fecha_mes.year}-{fecha_mes.month:02d}-{dia_mes_visual:02d}"
-                            llave_evaluada = f"('{nombre_norm_func}', '{f_reconstruida}')"
                             llave_backup = (nombre_norm_func, f_reconstruida)
-                            
                             if llave_backup in df_permisos_dict:
                                 minutos_p = df_permisos_dict[llave_backup]
                                 estado_rastreo = f"✅ MATCH RESPALDO ({minutos_p} min)"
                             else:
-                                estado_rastreo = f"❌ No existe la tupla en la BD"
+                                estado_rastreo = "❌ No existe la tupla en la BD"
 
                     if minutos_p > 0:
                         horas_permiso_lista.append(f"{minutos_p // 60:02d}:{minutos_p % 60:02d}")
@@ -470,7 +472,6 @@ if len(funcionarios_filtrados) > 0:
                     diagnostico_llaves_intentadas.append(llave_evaluada)
                     diagnostico_estado_cruce.append(estado_rastreo)
 
-                # Inyectamos las columnas de diagnóstico a la vista
                 df_detalle['Permiso Externo (Horas)'] = horas_permiso_lista
                 df_detalle['🔬 Llave que Buscó'] = diagnostico_llaves_intentadas
                 df_detalle['⚙️ Resultado del Cruce'] = diagnostico_estado_cruce
