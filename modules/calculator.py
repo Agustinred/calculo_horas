@@ -128,14 +128,16 @@ class HorasCalculator:
             salida_min = HorasCalculator._hora_a_minutos(hora_salida)
             minutos_reales = max(0, salida_min - entrada_min)
             
-        # 3. CRUCE: PERMISO COMPLEMENTARIO POR HORAS (A PARTIR DE EXCEL EXTERNO)
+        # 3. CRUCE ESTRICTO: PERMISO COMPLEMENTARIO POR HORAS
+        # Solo extrae datos si la observación contiene explícitamente la instrucción de cruce
         if "per. comple. (horas)" in obs_lower or "per. comple (horas)" in obs_lower:
             minutos_permiso_externo = 0
             if fecha_completa_str:
                 llave_cruce = (nombre_normalizado, fecha_completa_str)
+                # Al buscar la fecha_completa_str del día en curso (ej: '2026-01-06'), 
+                # si el permiso es de febrero ('2026-02-06'), no coincidirá y devolverá 0.
                 minutos_permiso_externo = dict_permisos.get(llave_cruce, 0)
             
-            # Suma el tiempo trabajado físicamente más lo autorizado por el permiso
             total_dia = minutos_reales + minutos_permiso_externo
             return total_dia, None
 
@@ -221,7 +223,7 @@ class HorasCalculator:
             acumulado = 0
             
             for _, row in df_semana.iterrows():
-                # Reconstrucción del string de fecha (YYYY-MM-DD) para buscar en el diccionario
+                # Reconstrucción fidedigna del string de fecha (YYYY-MM-DD)
                 fecha_str = None
                 if 'Fecha' in row and pd.notna(row['Fecha']):
                     fecha_str = pd.to_datetime(row['Fecha']).strftime('%Y-%m-%d')
@@ -256,6 +258,7 @@ class HorasCalculator:
             }
             resultados['dias_por_semana'][int(semana_num)] = dias_info
             
+            # Cálculo del acumulado mensual neto basado en diferencias semanales negativas
             if diferencia_minutos < 0:
                 resultados['total_minutos_mes'] += diferencia_minutos
         
