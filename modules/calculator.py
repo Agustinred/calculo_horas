@@ -5,6 +5,7 @@ Calculador de asistencia optimizado con soporte para cruce de permisos externos 
 
 import pandas as pd
 from datetime import datetime
+import re
 
 
 class HorasCalculator:
@@ -115,11 +116,11 @@ class HorasCalculator:
         
         horas_esperadas = HorasCalculator._obtener_horas_esperadas(dia_semana)
         
-        # 1. EVALUAR SI HAY UNA COMBINACIÓN COMPLETA PRIMERO (PER. ADM. MAÑANA + LIC. MED. TARDE)
+        # 1. EVALUAR SI HAY UNA COMBINACIÓN COMPLETA PRIMERO
         if ("permiso adm" in obs_lower or "per. adm" in obs_lower) and ("mañana" in obs_lower) and ("lic" in obs_lower) and ("tarde" in obs_lower):
-            return horas_esperadas, None
+            return horas_esperadas, 0, None
 
-        # 2. CALCULAR MARCAS REALES TRABAJADAS (SI EXISTEN ENTRADA Y SALIDA)
+        # 2. CALCULAR MARCAS REALES TRABAJADAS
         minutos_reales = 0
         tiene_marcas = (hora_entrada != "" and hora_salida != "")
         
@@ -128,12 +129,17 @@ class HorasCalculator:
             salida_min = HorasCalculator._hora_a_minutos(hora_salida)
             minutos_reales = max(0, salida_min - entrada_min)
             
-        # 3. CRUCE ESTRICTO: PERMISO COMPLEMENTARIO POR HORAS (CON IDENTIFICACIÓN ROBUSTA DE FECHAS)
-        if "per. comple. (horas)" in obs_lower or "per. comple (horas)" in obs_lower:
+        # 3. CRUCE ESTRICTO: PERMISO COMPLEMENTARIO POR HORAS (Búsqueda flexible para evitar fallos por puntos o espacios)
+        es_permiso_horas = False
+        if "per" in obs_lower and "compl" in obs_lower and "horas" in obs_lower:
+            es_permiso_horas = True
+        elif "permiso" in obs_lower and "horas" in obs_lower:
+            es_permiso_horas = True
+
+        if es_permiso_horas:
             minutos_permiso_externo = 0
             if fecha_completa_str:
                 try:
-                    # Se evalúan dinámicamente variaciones de formatos comunes (YYYY-MM-DD y DD-MM-YYYY)
                     ts = pd.to_datetime(fecha_completa_str)
                     fmt_ymd = ts.strftime('%Y-%m-%d')
                     fmt_dmy = ts.strftime('%d-%m-%Y')
@@ -143,12 +149,11 @@ class HorasCalculator:
                     
                     minutos_permiso_externo = dict_permisos.get(llave_ymd, dict_permisos.get(llave_dmy, 0))
                 except:
-                    # Respaldo de texto directo
                     llave_cruce = (nombre_normalizado, fecha_completa_str)
                     minutos_permiso_externo = dict_permisos.get(llave_cruce, 0)
             
             total_dia = minutos_reales + minutos_permiso_externo
-            return total_dia, None
+            return total_dia, minutos_permiso_externo, None
 
         # 4. EVALUAR JUSTIFICACIÓN PARCIAL (MEDIA JORNADA)
         just_parcial = HorasCalculator._obtener_justificacion_parcial(observacion)
@@ -158,22 +163,22 @@ class HorasCalculator:
             else:
                 minutos_bonificados = (4 * 60) + 30  
             
-            return (minutos_bonificados + minutos_reales), None
+            return (minutos_bonificados + minutos_reales), 0, None
 
-        # 5. EVALUAR JUSTIFICACIÓN COMPLETA (LICENCIA, VACACIONES, JUSTIFICADO, PER. COMPL. DÍA)
+        # 5. EVALUAR JUSTIFICACIÓN COMPLETA
         if HorasCalculator._es_justificacion_completa(observacion):
             if tiene_marcas and minutos_reales > horas_esperadas:
-                return minutos_reales, None
-            return horas_esperadas, None
+                return minutos_reales, 0, None
+            return horas_esperadas, 0, None
 
-        # 6. CASO NORMAL: SI TIENE MARCAS Y NO TIENE JUSTIFICACIONES
+        # 6. CASO NORMAL
         if tiene_marcas:
-            return minutos_reales, None
+            return minutos_reales, 0, None
         
-        # 7. MANEJO DE FALTAS DE MARCACIÓN Y ALERTAS
+        # 7. MANEJO DE FALTAS DE MARCACIÓN
         if hora_entrada == "" or hora_salida == "":
             if "no hábil" in obs_lower or "no habil" in obs_lower or "sabado" in dia_lower or "sábado" in dia_lower or "domingo" in dia_lower:
-                return 0, None
+                return 0, 0, None
             
             if hora_entrada == "" and hora_salida != "":
                 alerta = f"{nombre_display} - Día {numero_dia} ({dia_semana}): Falta HoraEntrada"
@@ -182,9 +187,9 @@ class HorasCalculator:
             elif hora_entrada == "" and hora_salida == "":
                 alerta = f"{nombre_display} - Día {numero_dia} ({dia_semana}): Falta Marcación Completa (Entrada y Salida)"
                 
-            return 0, alerta
+            return 0, 0, alerta
         
-        return 0, None
+        return 0, 0, None
     
     @staticmethod
     def _es_semana_parcial(df_semana, numero_semana, df_empleado_completo):
@@ -232,7 +237,6 @@ class HorasCalculator:
             acumulado = 0
             
             for _, row in df_semana.iterrows():
-                # Reconstrucción del string de fecha de forma controlada y limpia
                 fecha_str = None
                 if 'Fecha' in row and pd.notna(row['Fecha']):
                     try:
@@ -240,7 +244,8 @@ class HorasCalculator:
                     except:
                         fecha_str = str(row['Fecha']).split()[0]
                 
-                minutos_dia, alerta = HorasCalculator.calcular_horas_dia(
+                # Modificado para recibir minutos_externos retornados explícitamente
+                minutos_dia, minutos_externos, alerta = HorasCalculator.calcular_horas_dia(
                     row, fecha_completa_str=fecha_str, dict_permisos=dict_permisos
                 )
                 
@@ -257,6 +262,7 @@ class HorasCalculator:
                     'hora_salida': row.get('HoraSalida', ''),
                     'minutos': minutos_dia,
                     'acumulado': acumulado,
+                    'minutos_externos': minutos_externos,  # Guardamos el valor exacto para la UI
                     'observacion': row.get('Observacion', '')
                 })
             
@@ -270,7 +276,6 @@ class HorasCalculator:
             }
             resultados['dias_por_semana'][int(semana_num)] = dias_info
             
-            # Cálculo del acumulado mensual neto basado en diferencias semanales negativas
             if diferencia_minutos < 0:
                 resultados['total_minutos_mes'] += diferencia_minutos
         
