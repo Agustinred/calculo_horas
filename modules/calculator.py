@@ -1,8 +1,3 @@
-"""
-modules/calculator.py
-Calculador de asistencia optimizado con soporte para cruce de permisos externos por hora.
-"""
-
 import pandas as pd
 from datetime import datetime
 
@@ -10,7 +5,6 @@ from datetime import datetime
 class HorasCalculator:
     """Calcula horas trabajadas por funcionario incorporando cruces externos"""
     
-    # Observaciones que aseguran el piso de un día completo
     JUSTIFICACIONES_COMPLETAS = [
         "licencia médica", "lic. médica", "lic med",
         "per. con goce", "permiso con goce", "con goce",
@@ -20,7 +14,6 @@ class HorasCalculator:
         "feriado", "día feriado", "justificado"
     ]
     
-    # Observaciones que cuentan como media jornada
     JUSTIFICACIONES_PARCIALES = {
         "permiso adm. (mañana)": "mañana",
         "permiso adm. (tarde)": "tarde",
@@ -30,7 +23,6 @@ class HorasCalculator:
     
     @staticmethod
     def _hora_a_minutos(hora_str):
-        """Convierte HH:MM a minutos de forma segura"""
         if not hora_str or pd.isna(hora_str):
             return 0
         hora_str = str(hora_str).strip()
@@ -45,7 +37,6 @@ class HorasCalculator:
     
     @staticmethod
     def _minutos_a_hora(minutos):
-        """Convierte minutos a HH:MM"""
         horas = abs(minutos) // 60
         mins = abs(minutos) % 60
         signo = '-' if minutos < 0 else ''
@@ -53,7 +44,6 @@ class HorasCalculator:
     
     @staticmethod
     def _obtener_horas_esperadas(dia_semana):
-        """Retorna horas esperadas según día de la semana, excluyendo fines de semana"""
         dia_semana = str(dia_semana).strip().lower()
         if "sábado" in dia_semana or "sabado" in dia_semana or "domingo" in dia_semana:
             return 0  
@@ -64,7 +54,6 @@ class HorasCalculator:
     
     @staticmethod
     def _es_justificacion_completa(observacion):
-        """Verifica si la observación justifica un día completo"""
         if not observacion or pd.isna(observacion):
             return False
         
@@ -76,7 +65,6 @@ class HorasCalculator:
     
     @staticmethod
     def _obtener_justificacion_parcial(observacion):
-        """Retorna tipo de justificación parcial (mañana/tarde) si aplica"""
         if not observacion or pd.isna(observacion):
             return None
         
@@ -88,9 +76,6 @@ class HorasCalculator:
     
     @staticmethod
     def calcular_horas_dia(row, fecha_completa_str=None, dict_permisos=None):
-        """
-        Calcula horas de un día específico priorizando marcas reales y aplicando pisos/cruces por justificación
-        """
         alerta = None
         dict_permisos = dict_permisos or {}
         
@@ -115,9 +100,6 @@ class HorasCalculator:
         
         horas_esperadas = HorasCalculator._obtener_horas_esperadas(dia_semana)
         
-        # -------------------------------------------------------------------------
-        # 🎯 RESCATE GLOBAL E INDEPENDIENTE DE PERMISOS EXTERNOS POR HORA
-        # -------------------------------------------------------------------------
         minutos_permiso_externo = 0
         if fecha_completa_str:
             try:
@@ -133,11 +115,9 @@ class HorasCalculator:
                 llave_cruce = (nombre_normalizado, fecha_completa_str)
                 minutos_permiso_externo = dict_permisos.get(llave_cruce, 0)
 
-        # 1. EVALUAR SI HAY UNA COMBINACIÓN COMPLETA PRIMERO
         if ("permiso adm" in obs_lower or "per. adm" in obs_lower) and ("mañana" in obs_lower) and ("lic" in obs_lower) and ("tarde" in obs_lower):
             return horas_esperadas + minutos_permiso_externo, minutos_permiso_externo, None
 
-        # 2. CALCULAR MARCAS REALES TRABAJADAS
         minutos_reales = 0
         tiene_marcas = (hora_entrada != "" and hora_salida != "")
         
@@ -146,7 +126,6 @@ class HorasCalculator:
             salida_min = HorasCalculator._hora_a_minutos(hora_salida)
             minutos_reales = max(0, salida_min - entrada_min)
             
-        # 3. EVALUAR JUSTIFICACIÓN PARCIAL (MEDIA JORNADA)
         just_parcial = HorasCalculator._obtener_justificacion_parcial(observacion)
         if just_parcial in ["mañana", "tarde"]:
             if "viernes" in dia_lower:
@@ -157,17 +136,14 @@ class HorasCalculator:
             total_dia = minutos_bonificados + minutos_reales + minutos_permiso_externo
             return total_dia, minutos_permiso_externo, None
 
-        # 4. EVALUAR JUSTIFICACIÓN COMPLETA
         if HorasCalculator._es_justificacion_completa(observacion):
             base = max(minutos_reales, horas_esperadas) if tiene_marcas else horas_esperadas
             return base + minutos_permiso_externo, minutos_permiso_externo, None
 
-        # 5. CASO NORMAL (TIENE MARCAS)
         if tiene_marcas:
             total_dia = minutos_reales + minutos_permiso_externo
             return total_dia, minutos_permiso_externo, None
         
-        # 6. MANEJO DE FALTAS DE MARCACIÓN
         if hora_entrada == "" or hora_salida == "":
             if "no hábil" in obs_lower or "no habil" in obs_lower or "sabado" in dia_lower or "sábado" in dia_lower or "domingo" in dia_lower:
                 return minutos_permiso_externo, minutos_permiso_externo, None
@@ -187,9 +163,6 @@ class HorasCalculator:
     
     @staticmethod
     def _es_semana_parcial(df_semana, numero_semana, df_empleado_completo):
-        """
-        Detecta si una semana es parcial y calcula SOLO horas de días laborables (lunes-viernes)
-        """
         dias_en_semana = df_semana['DiaPalabra'].astype(str).str.lower().tolist() if 'DiaPalabra' in df_semana.columns else []
         numeros_dias = sorted(df_semana['Número'].tolist())
         
@@ -202,7 +175,6 @@ class HorasCalculator:
         if es_primera_semana or es_ultima_semana:
             meta_minutos = 0
             
-            # Filtro: Solo iterar sobre días laborables (lunes a viernes)
             if 'DiaSemana' in df_semana.columns:
                 df_laborables = df_semana[~df_semana['DiaSemana'].astype(str).str.lower().str.contains('sabado|sábado|domingo', na=False)]
             else:
@@ -217,7 +189,6 @@ class HorasCalculator:
     
     @staticmethod
     def procesar_funcionario(df_empleado, dict_permisos=None):
-        """Procesa un empleado completo mapeando fechas exactas para los cruces"""
         resultados = {
             'nombre': df_empleado['Nombre'].iloc[0] if len(df_empleado) > 0 else 'Desconocido',
             'semanas': {},
@@ -287,7 +258,6 @@ class HorasCalculator:
 
     @staticmethod
     def procesar_todos(df_hoja1, df_hoja2, dict_permisos=None):
-        """Procesa todos los empleados del mes aplicando el diccionario de permisos corregido"""
         resultados_todos = {}
         alertas_globales = []
         
