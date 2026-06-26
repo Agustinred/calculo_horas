@@ -19,7 +19,7 @@ class HorasCalculator:
         "per. compl. día", "permiso completo",
         "permiso matrimonio", "matrimonio",
         "vacaciones", "año nuevo", "viernes santo", "sabado santo",
-        "feriado", "día feriado", "justificado"
+        "feriado", "día feriado", "justificado", "per. adm. mañana, lic. med. tarde"
     ]
 
     JUSTIFICACIONES_PARCIALES = {
