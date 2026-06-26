@@ -1,7 +1,7 @@
 """
 modules/calculator.py
 Calculador de asistencia optimizado con soporte para cruce de permisos externos por hora.
-CORREGIDO: _es_semana_parcial() solo suma días laborables (lunes a viernes)
+✅ VERSIÓN FINAL: Sin código de Streamlit, solo lógica pura
 """
 
 import pandas as pd
@@ -130,20 +130,9 @@ class HorasCalculator:
                 llave_ymd = (nombre_normalizado, fmt_ymd)
                 llave_dmy = (nombre_normalizado, fmt_dmy)
                 
-                # Herramienta de Diagnóstico en terminal para verificar las claves generadas
-                match_ymd = llave_ymd in dict_permisos
-                match_dmy = llave_dmy in dict_permisos
-                print(f"[DIAGNÓSTICO] Funcionario: {nombre_normalizado} | Fecha Evaluada: {fecha_completa_str}")
-                print(f"  -> Buscando Llave YMD {llave_ymd}: {'✅ ENCONTRADA' if match_ymd else '❌ NO EXISTE'}")
-                print(f"  -> Buscando Llave DMY {llave_dmy}: {'✅ ENCONTRADA' if match_dmy else '❌ NO EXISTE'}")
-                
                 minutos_permiso_externo = dict_permisos.get(llave_ymd, dict_permisos.get(llave_dmy, 0))
-                print(f"  -> Minutos rescatados: {minutos_permiso_externo}")
             except Exception as e:
                 llave_cruce = (nombre_normalizado, fecha_completa_str)
-                match_cruce = llave_cruce in dict_permisos
-                print(f"[DIAGNÓSTICO FALLBACK] Error parseo fecha: {e}")
-                print(f"  -> Buscando Llave Directa {llave_cruce}: {'✅ ENCONTRADA' if match_cruce else '❌ NO EXISTE'}")
                 minutos_permiso_externo = dict_permisos.get(llave_cruce, 0)
 
         # 1. EVALUAR SI HAY UNA COMBINACIÓN COMPLETA PRIMERO
@@ -202,11 +191,6 @@ class HorasCalculator:
     def _es_semana_parcial(df_semana, numero_semana, df_empleado_completo):
         """
         ✅ CORREGIDO: Detecta si una semana es parcial y calcula SOLO horas de días laborables (lunes-viernes)
-        
-        Cambios:
-        - Solo suma horas para días lunes a viernes
-        - Ignora sábado y domingo completamente
-        - Calcula correctamente: jueves=9h, viernes=8h
         """
         dias_en_semana = df_semana['DiaPalabra'].astype(str).str.lower().tolist()
         numeros_dias = sorted(df_semana['Número'].tolist())
