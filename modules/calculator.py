@@ -19,7 +19,7 @@ class HorasCalculator:
         "per. compl. día", "permiso completo",
         "permiso matrimonio", "matrimonio",
         "vacaciones", "año nuevo", "viernes santo", "sabado santo",
-        "feriado", "día feriado", "justificado", "per. adm. mañana, lic. med. tarde"
+        "feriado", "día feriado", "justificado"
     ]
 
     JUSTIFICACIONES_PARCIALES = {
@@ -249,8 +249,16 @@ class HorasCalculator:
         resultados_todos = {}
         alertas_globales = []
 
+        df_hoja1 = df_hoja1.copy()
+
+        # --- Tolerar variantes de encabezado: 'Numero' (sin tilde) vs 'Número' ---
+        if 'Número' not in df_hoja1.columns:
+            for variante in ['Numero', 'NUMERO', 'numero', 'número']:
+                if variante in df_hoja1.columns:
+                    df_hoja1 = df_hoja1.rename(columns={variante: 'Número'})
+                    break
+
         if 'Nombre_Normalizado' not in df_hoja1.columns:
-            df_hoja1 = df_hoja1.copy()
             df_hoja1['Nombre_Normalizado'] = df_hoja1['Nombre'].apply(
                 lambda x: str(x).lower().strip() if pd.notna(x) else ''
             )
