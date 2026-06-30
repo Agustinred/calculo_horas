@@ -21,7 +21,7 @@ class HorasCalculator:
         "vacaciones", "año nuevo", "viernes santo", "sabado santo",
         "feriado", "día feriado", "justificado",
         "permiso postnatal",
-        "per. comple. (horas), jornada medio día"
+        "per. comple. (horas), jornada medio día", "per. fallecimiento padre", "per. adm. mañana, lic. med. tarde"
     ]
 
     JUSTIFICACIONES_PARCIALES = {
