@@ -10,29 +10,107 @@ from modules.exporter import Exporter
 
 st.set_page_config(
     page_title="DTPM - Cálculo de Horas",
-    page_icon="⏱️",
+    page_icon="🏛️",
     layout="wide"
 )
 
 st.markdown("""
     <style>
-        .title-section {
-            border-bottom: 3px solid #1f77b4;
-            padding-bottom: 1rem;
-            margin-bottom: 2rem;
+        @import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&display=swap');
+
+        html, body, [class*="css"] {
+            font-family: 'Source Sans 3', 'Segoe UI', Arial, sans-serif;
+        }
+
+        :root {
+            --institucional-azul: #163A5F;
+            --institucional-azul-claro: #2F5C8A;
+            --institucional-gris: #5B6670;
+            --institucional-fondo: #F5F6F8;
+        }
+
+        /* Cabecera institucional */
+        .header-institucional {
+            background-color: var(--institucional-azul);
+            color: #FFFFFF;
+            padding: 1.5rem 2rem;
+            border-radius: 0.25rem;
+            margin-bottom: 1.75rem;
+        }
+        .header-institucional h1 {
+            color: #FFFFFF;
+            font-size: 1.6rem;
+            font-weight: 700;
+            margin: 0 0 0.25rem 0;
+        }
+        .header-institucional p {
+            color: #D7E0EA;
+            font-size: 0.95rem;
+            margin: 0;
+        }
+
+        /* Subtítulos de sección */
+        h2, h3 {
+            color: var(--institucional-azul) !important;
+            font-weight: 700 !important;
+            border-bottom: 1px solid #DDE2E7;
+            padding-bottom: 0.4rem;
+        }
+
+        /* Botones */
+        .stButton button, .stDownloadButton button {
+            background-color: var(--institucional-azul) !important;
+            color: #FFFFFF !important;
+            border: none !important;
+            border-radius: 0.25rem !important;
+            font-weight: 600 !important;
+        }
+        .stButton button:hover, .stDownloadButton button:hover {
+            background-color: var(--institucional-azul-claro) !important;
+        }
+
+        /* Métricas */
+        div[data-testid="stMetric"] {
+            background-color: #FFFFFF;
+            border: 1px solid #E2E6EA;
+            border-radius: 0.25rem;
+            padding: 0.75rem 1rem;
+        }
+
+        /* Sidebar */
+        section[data-testid="stSidebar"] {
+            background-color: var(--institucional-fondo);
+        }
+
+        /* Tarjeta de semana */
+        .tarjeta-semana {
+            background-color: #FFFFFF;
+            border: 1px solid #E2E6EA;
+            border-left: 5px solid #CCCCCC;
+            border-radius: 0.25rem;
+            padding: 1rem 1.25rem;
+            margin-bottom: 1rem;
+        }
+        .tarjeta-semana h4 {
+            margin: 0 0 0.35rem 0;
+            color: var(--institucional-azul);
+        }
+        .tarjeta-semana p {
+            margin: 0;
+            color: #2A2F35;
         }
     </style>
 """, unsafe_allow_html=True)
 
 st.markdown("""
-    <div class="title-section">
-        <h1>⏱️ DTPM - Herramienta de Cálculo de Horas</h1>
-        <p>Análisis de cumplimiento horario de funcionarios</p>
+    <div class="header-institucional">
+        <h1>DTPM &middot; Herramienta de Cálculo de Horas</h1>
+        <p>Dirección de Transporte Público Metropolitano &mdash; Análisis de cumplimiento horario de funcionarios</p>
     </div>
 """, unsafe_allow_html=True)
 
 # Sidebar
-st.sidebar.header("📁 Carga de Archivos")
+st.sidebar.header("Carga de Archivos")
 st.sidebar.info("Carga un archivo Excel con Hoja1 y Hoja2")
 
 archivos_subidos = st.sidebar.file_uploader(
@@ -51,7 +129,7 @@ uploaded_file_permisos = st.sidebar.file_uploader(
 )
 
 if not archivos_subidos:
-    st.info("📤 Carga un archivo Excel para comenzar")
+    st.info("Carga un archivo Excel para comenzar")
     st.markdown("""
     **Requisitos del archivo:**
     - Hoja1: Datos de marcación (Nombre, DiaSemana, HoraEntrada, HoraSalida, etc.)
@@ -103,13 +181,13 @@ minutos_mes_map = {r['nombre']: r.get('total_minutos_mes', 0) for r in resultado
 
 
 def _pintar_fila_resumen(row):
-    color, _ = Formatter.determinar_color_semana(minutos_mes_map.get(row['Nombre'], 0))
+    color, _, _ = Formatter.determinar_color_semana(minutos_mes_map.get(row['Nombre'], 0))
     return [f'background-color: {color}'] * len(row)
 
 # =========================================================================
 # 🔍 FILTROS GLOBALES (aplican a Resumen General y a Detalles por Funcionario)
 # =========================================================================
-st.subheader("🔍 Filtros")
+st.subheader("Filtros")
 
 col_f1, col_f2 = st.columns(2)
 
@@ -136,7 +214,7 @@ if filtro_gerencia:
 if filtro_juridica:
     df_resumen_filtrado = df_resumen_filtrado[df_resumen_filtrado['Calidad Jurídica'].isin(filtro_juridica)]
 
-st.subheader("📊 Resumen General")
+st.subheader("Resumen General")
 st.dataframe(
     df_resumen_filtrado.style.apply(_pintar_fila_resumen, axis=1),
     use_container_width=True,
@@ -146,7 +224,7 @@ st.dataframe(
 # =========================================================================
 # 📋 VISTA DETALLADA POR FUNCIONARIO
 # =========================================================================
-st.subheader("👤 Detalles por Funcionario")
+st.subheader("Detalles por Funcionario")
 
 orden = st.radio(
     "Ordenar por:",
@@ -192,18 +270,12 @@ if funcionarios_filtrados:
             with col3:
                 total_mes = resultado_funcionario['total_minutos_mes']
                 texto_total = Formatter._minutos_a_hora_texto(total_mes)
+                _, estado_mes, _ = Formatter.determinar_color_semana(total_mes)
 
-                if total_mes <= -60:
-                    estado = "❌"
-                elif total_mes < 0:
-                    estado = "⚠️"
-                else:
-                    estado = "✅"
-
-                st.metric("Total Mes", f"{estado} {texto_total}")
+                st.metric("Total Mes", texto_total, help=f"Estado: {estado_mes}")
 
             st.markdown("---")
-            st.markdown("**📋 Detalles de Horas:**")
+            st.markdown("**Detalles de Horas:**")
 
             semanas_disponibles = sorted(resultado_funcionario['semanas'].keys())
             col1, col2 = st.columns([2, 1])
@@ -233,7 +305,7 @@ if funcionarios_filtrados:
                 meta = semana_info['minutos_esperados']
                 es_parcial = semana_info.get('es_parcial', False)
 
-                color, estado = Formatter.determinar_color_semana(diferencia)
+                color, estado, acento = Formatter.determinar_color_semana(diferencia)
                 texto_diferencia = Formatter._minutos_a_hora_texto(diferencia)
                 texto_trabajado = Formatter._minutos_a_hora_texto(minutos_trabajados)
                 texto_meta = Formatter._minutos_a_hora_texto(meta)
@@ -241,9 +313,9 @@ if funcionarios_filtrados:
                 marca_parcial = " (Semana Parcial)" if es_parcial else ""
 
                 st.markdown(f"""
-                <div style="background-color: {color}; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+                <div class="tarjeta-semana" style="background-color: {color}; border-left-color: {acento};">
                     <h4>Semana {semana_num}{marca_parcial}</h4>
-                    <p><strong>Trabajadas:</strong> {texto_trabajado} | <strong>Meta:</strong> {texto_meta} | <strong>Diferencia:</strong> {texto_diferencia} {estado}</p>
+                    <p><strong>Trabajadas:</strong> {texto_trabajado} &nbsp;|&nbsp; <strong>Meta:</strong> {texto_meta} &nbsp;|&nbsp; <strong>Diferencia:</strong> {texto_diferencia} &nbsp;|&nbsp; <strong>Estado:</strong> {estado}</p>
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -292,14 +364,14 @@ if funcionarios_filtrados:
                 # ====================================================================================
 
 # EXPORTACIÓN
-st.subheader("📥 Exportar Resultados")
+st.subheader("Exportar Resultados")
 
 col1, col2, col3 = st.columns(3)
 
 with col1:
     csv_data = Exporter.exportar_csv(df_resumen_filtrado)
     st.download_button(
-        "📄 Descargar CSV",
+        "Descargar CSV",
         csv_data,
         f"horas_{archivo.name.split('.')[0]}.csv",
         "text/csv",
@@ -309,7 +381,7 @@ with col1:
 with col2:
     excel_data = Exporter.exportar_excel(df_resumen_filtrado)
     st.download_button(
-        "📊 Descargar Excel",
+        "Descargar Excel",
         excel_data,
         f"horas_{archivo.name.split('.')[0]}.xlsx",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -319,7 +391,7 @@ with col2:
 with col3:
     html_data = Exporter.exportar_html(df_resumen_filtrado)
     st.download_button(
-        "🌐 Descargar HTML",
+        "Descargar HTML",
         html_data,
         f"horas_{archivo.name.split('.')[0]}.html",
         "text/html",
@@ -327,16 +399,16 @@ with col3:
     )
 
 # =========================================================================
-# 🔍 BÚSQUEDA Y REVISIÓN DE PERMISOS COMPLEMENTARIOS (al final, fase de pruebas)
+# BÚSQUEDA Y REVISIÓN DE PERMISOS COMPLEMENTARIOS (al final, fase de pruebas)
 # =========================================================================
 st.markdown("---")
-st.subheader("🔍 Búsqueda y revisión de permisos complementarios")
+st.subheader("Búsqueda y revisión de permisos complementarios")
 with st.expander("Analizar Diccionario Global de Permisos Externos", expanded=False):
     if df_permisos_dict:
-        st.write(f"📊 **Total de registros clave construidos en memoria:** {len(df_permisos_dict)}")
+        st.write(f"**Total de registros clave construidos en memoria:** {len(df_permisos_dict)}")
 
         # Formulario interactivo para auditar tuplas
-        st.write("🧪 **Simulador de Búsqueda Manual de Coincidencias:**")
+        st.write("**Simulador de Búsqueda Manual de Coincidencias:**")
         col_d1, col_d2 = st.columns(2)
         with col_d1:
             nombre_prueba = st.text_input(
@@ -354,16 +426,16 @@ with st.expander("Analizar Diccionario Global de Permisos Externos", expanded=Fa
         if nombre_prueba and fecha_prueba:
             llave_prueba = (nombre_prueba.strip().lower(), fecha_prueba.strip())
             st.markdown("---")
-            st.write(f"🔎 *Buscando tupla:* `{llave_prueba}`")
+            st.write(f"*Buscando tupla:* `{llave_prueba}`")
             if llave_prueba in df_permisos_dict:
                 minutos = df_permisos_dict[llave_prueba]
                 horas = minutos / 60
-                st.success(f"✅ ¡COINCIDENCIA ENCONTRADA! Valor: {minutos} minutos ({horas:.1f}h)")
+                st.success(f"Coincidencia encontrada. Valor: {minutos} minutos ({horas:.1f} h)")
             else:
-                st.error("❌ La llave no existe en el diccionario.")
+                st.error("La llave no existe en el diccionario.")
 
-        st.write("📋 **Vista previa JSON de las primeras 20 llaves:**")
+        st.write("**Vista previa JSON de las primeras 20 llaves:**")
         muestra_dict = {f"{k[0]} | {k[1]}": f"{v} mins ({v/60:.1f}h)" for k, v in list(df_permisos_dict.items())[:20]}
         st.json(muestra_dict)
     else:
-        st.info("💡 No hay datos en el diccionario de permisos. Carga un archivo de permisos para poblar el inspector.")
+        st.info("No hay datos en el diccionario de permisos. Carga un archivo de permisos para poblar el inspector.")
