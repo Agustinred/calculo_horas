@@ -95,6 +95,17 @@ resultados, alertas = HorasCalculator.procesar_todos(df_hoja1, df_hoja2, dict_pe
 # Crear resumen
 df_resumen = Formatter.crear_df_resumen(resultados)
 
+# Quitar columnas de detalle de semanas (no se muestran en el resumen general)
+df_resumen = df_resumen.drop(columns=['Semanas Completas', 'Semanas Parciales'], errors='ignore')
+
+# Mapa nombre → minutos totales del mes, para pintar cada fila según cumplimiento
+minutos_mes_map = {r['nombre']: r.get('total_minutos_mes', 0) for r in resultados.values()}
+
+
+def _pintar_fila_resumen(row):
+    color, _ = Formatter.determinar_color_semana(minutos_mes_map.get(row['Nombre'], 0))
+    return [f'background-color: {color}'] * len(row)
+
 # =========================================================================
 # 🔍 FILTROS GLOBALES (aplican a Resumen General y a Detalles por Funcionario)
 # =========================================================================
@@ -126,7 +137,11 @@ if filtro_juridica:
     df_resumen_filtrado = df_resumen_filtrado[df_resumen_filtrado['Calidad Jurídica'].isin(filtro_juridica)]
 
 st.subheader("📊 Resumen General")
-st.dataframe(df_resumen_filtrado, use_container_width=True, hide_index=True)
+st.dataframe(
+    df_resumen_filtrado.style.apply(_pintar_fila_resumen, axis=1),
+    use_container_width=True,
+    hide_index=True
+)
 
 # =========================================================================
 # 📋 VISTA DETALLADA POR FUNCIONARIO
