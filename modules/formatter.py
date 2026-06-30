@@ -19,13 +19,17 @@ class Formatter:
     
     @staticmethod
     def determinar_color_semana(diferencia_minutos):
-        """Determina color y estado según la diferencia de horas"""
+        """
+        Determina color de fondo, texto de estado y color de acento
+        según la diferencia de horas. Paleta institucional (tonos suaves,
+        sin colores saturados), adecuada para reportes formales.
+        """
         if diferencia_minutos <= -60:
-            return "#ffcccc", "❌ FALTA ≥1H"
+            return "#FBEAEA", "No cumple", "#B3261E"
         elif diferencia_minutos < 0:
-            return "#ffe6cc", "⚠️ FALTA <1H"
+            return "#FDF3E2", "Atención", "#B26A00"
         else:
-            return "#ccffcc", "✅ OK"
+            return "#E9F3EC", "Cumple", "#2E7D46"
     
     @staticmethod
     def crear_df_resumen(resultados):
@@ -49,12 +53,7 @@ class Formatter:
             
             texto_diferencia = Formatter._minutos_a_hora_texto(total_minutos)
             
-            if total_minutos <= -60:
-                estado = "❌"
-            elif total_minutos < 0:
-                estado = "⚠️"
-            else:
-                estado = "✅"
+            _, estado, _ = Formatter.determinar_color_semana(total_minutos)
             
             datos_resumen.append({
                 'Nombre': nombre,
