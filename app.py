@@ -189,7 +189,7 @@ def _pintar_fila_resumen(row):
 # =========================================================================
 st.subheader("Filtros")
 
-col_f1, col_f2 = st.columns(2)
+col_f1, col_f2, col_f3 = st.columns(3)
 
 with col_f1:
     filtro_gerencia = st.multiselect(
@@ -205,6 +205,16 @@ with col_f2:
         key="filtro_juridica"
     )
 
+with col_f3:
+    # Orden fijo: primero "No cumple", luego "Atención", luego "Cumple"
+    estados_disponibles = [e for e in ["No cumple", "Atención", "Cumple"]
+                           if e in df_resumen['Estado'].unique()]
+    filtro_estado = st.multiselect(
+        "Filtrar por Estado:",
+        options=estados_disponibles,
+        key="filtro_estado"
+    )
+
 # Aplicar filtros globales (selección vacía = sin filtro, se muestra todo)
 df_resumen_filtrado = df_resumen.copy()
 
@@ -213,6 +223,9 @@ if filtro_gerencia:
 
 if filtro_juridica:
     df_resumen_filtrado = df_resumen_filtrado[df_resumen_filtrado['Calidad Jurídica'].isin(filtro_juridica)]
+
+if filtro_estado:
+    df_resumen_filtrado = df_resumen_filtrado[df_resumen_filtrado['Estado'].isin(filtro_estado)]
 
 st.subheader("Resumen General")
 st.dataframe(
