@@ -76,28 +76,44 @@ class DataLoader:
     @staticmethod
     def construir_dict_permisos(archivo_permisos):
         """
-        Construye un diccionario de permisos externos por hora
+        Construye un diccionario de permisos externos por hora a partir de un archivo Excel
         Estructura: {(nombre_normalizado, 'YYYY-MM-DD'): minutos}
-        
+
+        Retorna: (dict_permisos, debug_df_permisos)
+        """
+        try:
+            df_permisos = pd.read_excel(archivo_permisos, sheet_name=0)
+        except Exception as e:
+            print(f"❌ Error al cargar permisos: {str(e)}")
+            return {}, pd.DataFrame()
+
+        return DataLoader.construir_dict_permisos_desde_df(df_permisos)
+
+    @staticmethod
+    def construir_dict_permisos_desde_df(df_permisos):
+        """
+        Construye un diccionario de permisos externos por hora a partir de un DataFrame ya cargado
+        (mismo esquema de columnas que el archivo de permisos: ApellidoPaterno, ApellidoMaterno,
+        Nombres, FechaInicio, CantidadEnHora)
+        Estructura: {(nombre_normalizado, 'YYYY-MM-DD'): minutos}
+
         Retorna: (dict_permisos, debug_df_permisos)
         """
         dict_permisos = {}
         debug_df_permisos = pd.DataFrame()
-        
+
         try:
-            df_permisos = pd.read_excel(archivo_permisos, sheet_name=0)
-            
             # Validar columnas requeridas
             columnas_requeridas = ['ApellidoPaterno', 'ApellidoMaterno', 'Nombres', 'FechaInicio', 'CantidadEnHora']
             columnas_faltantes = [col for col in columnas_requeridas if col not in df_permisos.columns]
-            
+
             if columnas_faltantes:
                 print(f"⚠️ Columnas faltantes: {columnas_faltantes}")
                 return dict_permisos, debug_df_permisos
-            
+
             # Procesar cada registro
             registros_procesados = []
-            
+
             for idx, row in df_permisos.iterrows():
                 try:
                     # Construir nombre completo normalizado

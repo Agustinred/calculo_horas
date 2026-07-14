@@ -27,6 +27,17 @@ class Exporter:
         return output.getvalue()
     
     @staticmethod
+    def exportar_permisos_excel(df_permisos):
+        """Exporta el detalle de permisos (original + manuales) a Excel"""
+        output = io.BytesIO()
+
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df_permisos.to_excel(writer, sheet_name='Permisos', index=False)
+
+        output.seek(0)
+        return output.getvalue()
+
+    @staticmethod
     def exportar_html(df_resumen):
         """Exporta resumen a HTML"""
         html = """

@@ -128,6 +128,39 @@ uploaded_file_permisos = st.sidebar.file_uploader(
     key="uploader_permisos"
 )
 
+# =========================================================================
+# 📝 REGISTRO MANUAL DE PERMISOS (popup)
+# =========================================================================
+if "permisos_manuales" not in st.session_state:
+    st.session_state["permisos_manuales"] = pd.DataFrame(
+        columns=['ApellidoPaterno', 'ApellidoMaterno', 'Nombres', 'FechaInicio', 'CantidadEnHora', 'Motivo']
+    )
+
+
+@st.dialog("Registrar permiso manual")
+def _dialog_registrar_permiso(nombres_disponibles):
+    nombre_seleccionado = st.selectbox("Nombre de la persona:", options=nombres_disponibles)
+    dia_seleccionado = st.date_input("Día del permiso:")
+    horas_permiso = st.number_input("Cantidad de horas:", min_value=0.0, max_value=24.0, step=0.5)
+    motivo = st.text_input("Nombre del permiso (opcional):")
+
+    if st.button("Guardar", use_container_width=True):
+        nueva_fila = pd.DataFrame([{
+            'ApellidoPaterno': '',
+            'ApellidoMaterno': '',
+            'Nombres': nombre_seleccionado,
+            'FechaInicio': pd.Timestamp(dia_seleccionado),
+            'CantidadEnHora': horas_permiso,
+            'Motivo': motivo
+        }])
+        st.session_state["permisos_manuales"] = pd.concat(
+            [st.session_state["permisos_manuales"], nueva_fila],
+            ignore_index=True
+        )
+        st.session_state["mostrar_dialog_permiso"] = False
+        st.rerun()
+
+
 if not archivos_subidos:
     st.info("Carga un archivo Excel para comenzar")
     st.markdown("""
@@ -136,23 +169,6 @@ if not archivos_subidos:
     - Hoja2: Catálogo (NOMBRE, GERENCIA)
     """)
     st.stop()
-
-# =========================================================================
-# 🎯 PROCESAMIENTO DE LA BASE DE PERMISOS EXTERNA (silencioso, sin UI aquí)
-# =========================================================================
-df_permisos_dict = {}
-debug_df_permisos = pd.DataFrame()
-
-if uploaded_file_permisos:
-    try:
-        df_permisos_dict, debug_df_permisos = DataLoader.construir_dict_permisos(uploaded_file_permisos)
-
-        if df_permisos_dict:
-            st.sidebar.success(f"✅ Se cargaron {len(df_permisos_dict)} registros de permisos")
-        else:
-            st.sidebar.warning("⚠️ No se pudieron procesar permisos. Verifica el formato del archivo.")
-    except Exception as e:
-        st.sidebar.error(f"⚠️ Error al procesar permisos: {str(e)}")
 
 # =========================================================================
 # 🔄 PROCESAMIENTO DE ARCHIVOS PRINCIPALES
@@ -166,6 +182,47 @@ if errores:
     for error in errores:
         st.error(error)
     st.stop()
+
+# Botón de registro manual de permisos (requiere los nombres de Hoja1 ya cargados)
+if "mostrar_dialog_permiso" not in st.session_state:
+    st.session_state["mostrar_dialog_permiso"] = False
+
+if 'Nombre' in df_hoja1.columns:
+    _nombres_disponibles = sorted(df_hoja1['Nombre'].dropna().unique().tolist())
+    if st.sidebar.button("➕ Registrar permiso manual", use_container_width=True):
+        st.session_state["mostrar_dialog_permiso"] = True
+
+    if st.session_state["mostrar_dialog_permiso"]:
+        _dialog_registrar_permiso(_nombres_disponibles)
+
+# =========================================================================
+# 🎯 PROCESAMIENTO DE LA BASE DE PERMISOS (archivo subido + registros manuales)
+# =========================================================================
+df_permisos_dict = {}
+debug_df_permisos = pd.DataFrame()
+df_permisos_raw = pd.DataFrame()
+
+if uploaded_file_permisos:
+    try:
+        df_permisos_raw = pd.read_excel(uploaded_file_permisos, sheet_name=0)
+    except Exception as e:
+        st.sidebar.error(f"⚠️ Error al leer archivo de permisos: {str(e)}")
+
+df_permisos_combinado = pd.concat(
+    [df_permisos_raw, st.session_state["permisos_manuales"]],
+    ignore_index=True
+)
+
+if not df_permisos_combinado.empty:
+    try:
+        df_permisos_dict, debug_df_permisos = DataLoader.construir_dict_permisos_desde_df(df_permisos_combinado)
+
+        if df_permisos_dict:
+            st.sidebar.success(f"✅ Se cargaron {len(df_permisos_dict)} registros de permisos")
+        else:
+            st.sidebar.warning("⚠️ No se pudieron procesar permisos. Verifica el formato del archivo.")
+    except Exception as e:
+        st.sidebar.error(f"⚠️ Error al procesar permisos: {str(e)}")
 
 # Procesar todos los funcionarios
 resultados, alertas = HorasCalculator.procesar_todos(df_hoja1, df_hoja2, dict_permisos=df_permisos_dict)
@@ -379,7 +436,7 @@ if funcionarios_filtrados:
 # EXPORTACIÓN
 st.subheader("Exportar Resultados")
 
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 
 with col1:
     csv_data = Exporter.exportar_csv(df_resumen_filtrado)
@@ -410,6 +467,19 @@ with col3:
         "text/html",
         use_container_width=True
     )
+
+with col4:
+    if not df_permisos_combinado.empty:
+        permisos_excel_data = Exporter.exportar_permisos_excel(df_permisos_combinado)
+        st.download_button(
+            "Descargar Permisos (Excel)",
+            permisos_excel_data,
+            "permisos_actualizado.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+    else:
+        st.button("Descargar Permisos (Excel)", disabled=True, use_container_width=True)
 
 # =========================================================================
 # BÚSQUEDA Y REVISIÓN DE PERMISOS COMPLEMENTARIOS (al final, fase de pruebas)
