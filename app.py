@@ -137,7 +137,11 @@ if "permisos_manuales" not in st.session_state:
     )
 
 
-@st.dialog("Registrar permiso manual")
+def _cerrar_dialog_permiso():
+    st.session_state["mostrar_dialog_permiso"] = False
+
+
+@st.dialog("Registrar permiso manual", on_dismiss=_cerrar_dialog_permiso)
 def _dialog_registrar_permiso(nombres_disponibles):
     nombre_seleccionado = st.selectbox("Nombre de la persona:", options=nombres_disponibles)
     dia_seleccionado = st.date_input("Día del permiso:")
